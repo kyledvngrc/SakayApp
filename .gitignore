@@ -1,0 +1,31 @@
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Local-only notes (not part of the repo)
+CLAUDE.md
+guideline.md
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Expo
+node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/ios/
+mobile/android/
+*.log
+
+# Local database data
+pgdata/
