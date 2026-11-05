@@ -4,6 +4,10 @@ Pure functions over an immutable FareRule. The rule's numbers always come from
 the fare_rules table (cited from the official LTFRB fare matrix); nothing here
 hard-codes a peso amount.
 
+The matrix lists two sets of amounts: regular, and discounted (students,
+seniors, PWDs). Both are charged the same way: the base fare covers the base
+distance, then the per-km rate for each kilometre after it.
+
 Assumption to confirm against the official matrix: distance past the base km is
 charged per started kilometre (rounded up), and amounts are rounded to the
 centavo.
@@ -28,7 +32,8 @@ class FareRule:
     base_fare: Decimal
     base_km: Decimal
     per_km_rate: Decimal
-    discount_rate: Decimal
+    discounted_base_fare: Decimal
+    discounted_per_km_rate: Decimal
     source: str
     is_placeholder: bool
 
@@ -42,12 +47,17 @@ def extra_km(rule: FareRule, km: Decimal) -> int:
     return max(0, math.ceil(km - rule.base_km))
 
 
+def distance_fare(base_fare: Decimal, per_km_rate: Decimal, rule: FareRule, km: Decimal) -> Decimal:
+    """Base fare plus `per_km_rate` for each kilometre past the rule's base distance."""
+    return to_centavo(base_fare + per_km_rate * extra_km(rule, km))
+
+
 def regular_fare(rule: FareRule, km: Decimal) -> Decimal:
-    return to_centavo(rule.base_fare + rule.per_km_rate * extra_km(rule, km))
+    return distance_fare(rule.base_fare, rule.per_km_rate, rule, km)
 
 
-def apply_discount(amount: Decimal, rate: Decimal) -> Decimal:
-    return to_centavo(amount * (Decimal("1") - rate))
+def discounted_fare(rule: FareRule, km: Decimal) -> Decimal:
+    return distance_fare(rule.discounted_base_fare, rule.discounted_per_km_rate, rule, km)
 
 
 def total_fare(amounts: Iterable[Decimal]) -> Decimal:

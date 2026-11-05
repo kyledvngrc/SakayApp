@@ -64,7 +64,8 @@ def load_network(s: Settings = settings) -> Network:
     # Latest rule already in effect, per vehicle type.
     fare_rules: dict[str, FareRule] = {}
     for row in fetch_all("""SELECT DISTINCT ON (vehicle_type) vehicle_type::text AS vehicle_type,
-                                   base_fare, base_km, per_km_rate, discount_rate, source,
+                                   base_fare, base_km, per_km_rate, discounted_base_fare,
+                                   discounted_per_km_rate, source,
                                    is_placeholder
                             FROM fare_rules WHERE effective_date <= CURRENT_DATE
                             ORDER BY vehicle_type, effective_date DESC"""):

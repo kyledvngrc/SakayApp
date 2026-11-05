@@ -56,8 +56,9 @@ CREATE TABLE fare_rules (
     base_fare      NUMERIC(6,2) NOT NULL CHECK (base_fare >= 0),
     base_km        NUMERIC(5,2) NOT NULL CHECK (base_km >= 0),
     per_km_rate    NUMERIC(6,2) NOT NULL CHECK (per_km_rate >= 0),
-    discount_rate  NUMERIC(4,3) NOT NULL DEFAULT 0
-                   CHECK (discount_rate >= 0 AND discount_rate < 1),
+    -- Student / senior / PWD amounts, entered as listed in the fare matrix.
+    discounted_base_fare   NUMERIC(6,2) NOT NULL CHECK (discounted_base_fare >= 0),
+    discounted_per_km_rate NUMERIC(6,2) NOT NULL CHECK (discounted_per_km_rate >= 0),
     effective_date DATE NOT NULL,
     source         TEXT NOT NULL,          -- citation, e.g. LTFRB memorandum circular no.
     is_placeholder BOOLEAN NOT NULL DEFAULT FALSE,

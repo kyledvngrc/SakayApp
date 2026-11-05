@@ -75,7 +75,15 @@ class FareRuleIn(BaseModel):
     base_fare: Decimal = Field(ge=0, max_digits=6, decimal_places=2)
     base_km: Decimal = Field(ge=0, max_digits=5, decimal_places=2)
     per_km_rate: Decimal = Field(ge=0, max_digits=6, decimal_places=2)
-    discount_rate: Decimal = Field(ge=0, lt=1, max_digits=4, decimal_places=3)
+    discounted_base_fare: Decimal = Field(ge=0, max_digits=6, decimal_places=2)
+    discounted_per_km_rate: Decimal = Field(ge=0, max_digits=6, decimal_places=2)
     effective_date: date
     source: str = Field(min_length=3, max_length=300)
     is_placeholder: bool = False
+
+    @model_validator(mode="after")
+    def discount_not_higher(self) -> "FareRuleIn":
+        if (self.discounted_base_fare > self.base_fare
+                or self.discounted_per_km_rate > self.per_km_rate):
+            raise ValueError("discounted amounts cannot be higher than the regular ones")
+        return self
