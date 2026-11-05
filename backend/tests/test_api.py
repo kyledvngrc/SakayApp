@@ -51,9 +51,9 @@ def test_plan_with_transfer(client):
     assert best["fare_available"] is False and best["total_fare"] is None   # placeholder fare
     assert body["notice"] is None and "minutes" not in best
     texts = [seg["instruction"] for seg in best["segments"]]
-    assert texts == ["Walk 20 m to the R01 route at Sample Plaza",
-                     "Ride R01 (Plaza - Corner) toward Corner and get off at Sample Corner, about 1.1 km",
-                     "Transfer to R02 (Corner - East End) toward East End and get off after about 1.1 km",
+    assert texts == ["Walk 20 m to the Plaza - Corner route at Sample Plaza",
+                     "Ride Plaza - Corner toward Corner and get off at Sample Corner, about 1.1 km",
+                     "Transfer to Corner - East End toward East End and get off after about 1.1 km",
                      "Walk 10 m to your destination"]
 
 

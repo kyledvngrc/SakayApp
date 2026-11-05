@@ -293,12 +293,16 @@ export default function PlanScreen() {
               key={i}
               trip={t}
               selected={i === selected}
-              onPress={() => (i === selected ? setMode('trip') : setSelected(i))}
+              onPress={() => setSelected(i)}
+              onStart={() => {
+                setSelected(i);
+                setMode('trip');
+              }}
             />
           ))}
           {trips.length > 0 && (
             <Text style={styles.hint}>
-              Tap a trip to show it on the map, tap again for directions. {plan.data?.estimates_note}
+              Tap a trip to see it on the map, or Start for directions. {plan.data?.estimates_note}
               {plan.data?.fare_source ? ` Fares: ${plan.data.fare_source}.` : ''}
             </Text>
           )}
