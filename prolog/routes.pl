@@ -33,7 +33,8 @@
     transfer_stop/1,
     find_trip/4,
     find_trip/5,
-    find_trips_from_any/5
+    find_trips_from_any/5,
+    find_trips_rows/5
 ]).
 
 :- dynamic leg/3.
@@ -61,11 +62,15 @@ ride_(Route, From, To, Visited, Out) :-
     ride_(Route, Next, To, [Next|Visited], Out).
 
 %!  transfer_stop(?Stop) is nondet.
-%   Stop is served by at least two different routes.
+%   Stop is served by at least two different routes. A route serves a stop
+%   if it arrives there or leaves from there (one-way routes may only arrive).
 transfer_stop(Stop) :-
-    leg(R1, Stop, _),
-    leg(R2, Stop, _),
+    serves(R1, Stop),
+    serves(R2, Stop),
     R1 \== R2.
+
+serves(Route, Stop) :- leg(Route, Stop, _).
+serves(Route, Stop) :- leg(Route, _, Stop).
 
 %!  trip(+From, +To, +MaxTransfers, +VisitedStops, +UsedRoutes, -Plan)
 %   Final ride straight to the destination...
@@ -99,3 +104,12 @@ find_trips_from_any(FromStops, ToStops, Max, Plan, Transfers) :-
     member(From, FromStops),
     member(To, ToStops),
     find_trip(From, To, Max, Plan, Transfers).
+
+%!  find_trips_rows(+FromStops, +ToStops, +Max, -Rows, -Transfers) is nondet.
+%   Same as find_trips_from_any/5, but each ride is a plain list
+%   [Route, Board, Alight, Stops] so the Python bridge can read it reliably.
+find_trips_rows(FromStops, ToStops, Max, Rows, Transfers) :-
+    find_trips_from_any(FromStops, ToStops, Max, Plan, Transfers),
+    maplist(ride_row, Plan, Rows).
+
+ride_row(ride(R, A, B, Stops), [R, A, B, Stops]).

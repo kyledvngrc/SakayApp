@@ -30,7 +30,8 @@ CREATE INDEX idx_stops_lat_lng ON stops (lat, lng);
 
 CREATE TABLE routes (
     id               SERIAL PRIMARY KEY,
-    code             TEXT NOT NULL UNIQUE,  -- used as the Prolog atom, e.g. 'R03'
+    code             TEXT NOT NULL UNIQUE   -- used as the Prolog atom, e.g. 'R03'
+                     CHECK (code ~ '^[A-Za-z0-9_-]+$'),
     name             TEXT NOT NULL,         -- e.g. "Toril - Bankerohan"
     color            TEXT NOT NULL DEFAULT '#1E88E5'
                      CHECK (color ~ '^#[0-9A-Fa-f]{6}$'),
