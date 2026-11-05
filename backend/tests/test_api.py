@@ -48,6 +48,11 @@ def test_plan_with_transfer(client):
     assert best["route_codes"] == ["R01", "R02"] and best["transfers"] == 1
     assert best["fare_available"] is False and best["total_fare"] is None   # placeholder fare
     assert body["notice"] is None
+    texts = [seg["instruction"] for seg in best["segments"]]
+    assert texts == ["Walk 10 m to Sample Stop A",
+                     "Ride R01 (Sample Route 1 (A - C)) and get off at Sample Stop C, about 860 m",
+                     "Transfer to R02 (Sample Route 2 (C - E)) and get off at Sample Stop E, about 800 m",
+                     "Walk 10 m to your destination"]
 
 
 def test_plan_far_away(client):

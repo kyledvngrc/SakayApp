@@ -67,7 +67,7 @@ label.check { display: flex; align-items: center; gap: 6px; color: var(--text); 
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 24px; width: min(360px, 100%);
 }
-.card button { width: 100%; margin-top: 8px; }
+.login .card button { width: 100%; margin-top: 8px; }
 
 .app { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
 .sidebar {
@@ -110,6 +110,8 @@ label.check { display: flex; align-items: center; gap: 6px; color: var(--text); 
 .stop-list input { padding: 3px 6px; }
 .stop-list .far { color: var(--danger); font-size: 11px; }
 .stop-list .shared { font-size: 11px; color: var(--muted); }
+.stop-list .star { font-size: 15px; color: var(--muted); }
+.stop-list .star.on { color: #f2a900; outline: none; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--border); }

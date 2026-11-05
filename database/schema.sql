@@ -20,6 +20,7 @@ CREATE TABLE stops (
     id           SERIAL PRIMARY KEY,
     name         TEXT NOT NULL,
     landmark     TEXT,                    -- e.g. "in front of SM Ecoland"
+    is_landmark  BOOLEAN NOT NULL DEFAULT FALSE,  -- recognisable name, used in directions
     lat          DOUBLE PRECISION NOT NULL CHECK (lat BETWEEN -90 AND 90),
     lng          DOUBLE PRECISION NOT NULL CHECK (lng BETWEEN -180 AND 180),
     data_source  TEXT,                    -- provenance, e.g. "group ride 2026-11-10"

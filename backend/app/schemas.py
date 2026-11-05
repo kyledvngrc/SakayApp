@@ -42,6 +42,7 @@ class LoginIn(BaseModel):
 class StopIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     landmark: str | None = Field(default=None, max_length=200)
+    is_landmark: bool = True          # stops created by hand are usually named places
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
     data_source: str | None = Field(default=None, max_length=200)
@@ -51,6 +52,7 @@ class StopIn(BaseModel):
 class StopPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     landmark: str | None = Field(default=None, max_length=200)
+    is_landmark: bool | None = None
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
     data_source: str | None = Field(default=None, max_length=200)
@@ -63,6 +65,7 @@ class RouteStopRef(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
+    is_landmark: bool = False         # auto-placed stops are generic until renamed
 
     @model_validator(mode="after")
     def existing_or_new(self) -> "RouteStopRef":

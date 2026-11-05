@@ -46,9 +46,9 @@ def fetch_all(sql: str, params: Sequence = ()) -> list[dict]:
 def load_network() -> Network:
     """Read stops, active routes, legs and current fare rules into a Network."""
     stops: dict[int, Stop] = {}
-    for row in fetch_all("SELECT id, name, landmark, lat, lng FROM stops"):
+    for row in fetch_all("SELECT id, name, landmark, lat, lng, is_landmark FROM stops"):
         stops[row["id"]] = Stop(id=row["id"], name=row["name"], landmark=row["landmark"],
-                                lat=row["lat"], lng=row["lng"])
+                                lat=row["lat"], lng=row["lng"], is_landmark=row["is_landmark"])
 
     stop_ids_by_route: dict[int, list[int]] = {}
     for row in fetch_all("SELECT route_id, stop_id FROM route_stops ORDER BY route_id, sequence_no"):

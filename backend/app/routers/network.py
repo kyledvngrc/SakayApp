@@ -11,7 +11,8 @@ router = APIRouter(tags=["network"])
 
 
 def _stop(s) -> dict:
-    return {"id": s.id, "name": s.name, "landmark": s.landmark, "lat": s.lat, "lng": s.lng}
+    return {"id": s.id, "name": s.name, "landmark": s.landmark, "is_landmark": s.is_landmark,
+            "lat": s.lat, "lng": s.lng}
 
 
 def _route(r) -> dict:

@@ -78,7 +78,7 @@ def _reload() -> dict:
 @router.get("/data")
 def admin_data() -> dict:
     """Everything the admin page needs, including inactive routes."""
-    stops = db.fetch_all("""SELECT id, name, landmark, lat, lng, data_source,
+    stops = db.fetch_all("""SELECT id, name, landmark, is_landmark, lat, lng, data_source,
                                    collected_on::text AS collected_on
                             FROM stops ORDER BY id""")
     routes = db.fetch_all("""SELECT id, code, name, color, vehicle_type::text AS vehicle_type,
@@ -108,9 +108,11 @@ def reload_network() -> dict:
 @_db_errors
 def create_stop(body: StopIn) -> dict:
     with db.transaction() as cur:
-        cur.execute("""INSERT INTO stops (name, landmark, lat, lng, data_source, collected_on)
-                       VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                    (body.name, body.landmark, body.lat, body.lng, body.data_source, body.collected_on))
+        cur.execute("""INSERT INTO stops (name, landmark, is_landmark, lat, lng, data_source,
+                                          collected_on)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (body.name, body.landmark, body.is_landmark, body.lat, body.lng,
+                     body.data_source, body.collected_on))
         stop_id = cur.fetchone()["id"]
     _reload()
     return {"id": stop_id}
@@ -178,9 +180,10 @@ def _save_route(cur, route_id: int | None, body: RouteIn) -> int:
                 raise HTTPException(422, f"Stop {ref.id} does not exist")
             stop_ids.append(ref.id)
         else:
-            cur.execute("""INSERT INTO stops (name, lat, lng, data_source, collected_on)
-                           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                        (ref.name, ref.lat, ref.lng, body.data_source, body.collected_on))
+            cur.execute("""INSERT INTO stops (name, is_landmark, lat, lng, data_source, collected_on)
+                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (ref.name, ref.is_landmark, ref.lat, ref.lng, body.data_source,
+                         body.collected_on))
             stop_ids.append(cur.fetchone()["id"])
     if len(stop_ids) != len(set(stop_ids)):
         raise HTTPException(422, "A stop can appear only once on a route")
