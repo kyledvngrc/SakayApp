@@ -19,4 +19,4 @@ For each technology: what it does in SakayApp, why it was chosen, and alternativ
 ## Data and limitations
 - Area covered and data collection dates: _TODO_
 - Fare source (LTFRB fare matrix citation): _TODO_
-- Limits: the app only knows the routes that have been entered; times are estimates.
+- Limits: the app only knows the routes that have been entered; distances and fares are estimates, and no travel times are given (waiting and traffic vary too much).
