@@ -70,6 +70,12 @@ test(bidirectional_loop_gives_both_ways,
 test(oneway_wrong_direction_fails, [setup(load([route('O1', [30,31,32], oneway)])), fail]) :-
     find_trip(32, 30, _, _).
 
+%  Regression: R01 only arrives at 3 (one-way), R02 leaves from 3.
+test(oneway_transfer, [setup(load([ route('R01', [1,2,3], oneway),
+                                    route('R02', [3,4,5], oneway) ])),
+                       true(Plans == [[ride('R01',1,3,[1,2,3]), ride('R02',3,5,[3,4,5])]])]) :-
+    all_plans(1, 5, 2, Plans).
+
 test(transfer_cap_blocks, [setup(chain_network), fail]) :-
     find_trip(20, 24, 2, _, _).
 

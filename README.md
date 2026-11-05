@@ -7,9 +7,9 @@ Built for **UN SDG 11, Target 11.2** (safe, affordable, accessible transport). T
 | Paradigm | Where |
 |---|---|
 | Logic | `prolog/routes.pl`: route search over `leg/3` facts |
-| Functional | `backend/app/geo.py`, `fare_calc.py`, `ranking.py`: pure functions |
-| Object-Oriented | `backend/app/models.py`, `fares.py`: `Trip`, `TripPlanner`, `FareStrategy` subclasses |
-| Imperative | `backend/app/main.py`, `db.py`, `prolog_bridge.py`: startup loading, request handling |
+| Functional | `backend/app/geo.py`, `fare_calc.py`, `ranking.py`: pure functions (map/filter/reduce, immutable data) |
+| Object-Oriented | `backend/app/models.py`, `fares.py`: `Segment` → `WalkSegment`/`RideSegment`, `Trip`, `TripPlanner`, `FareStrategy` → `RegularFare` → `DiscountedFare` |
+| Imperative | `backend/app/main.py`, `services.py`, `db.py`, `prolog_bridge.py`, `routers/`: startup loading, request handling |
 
 ## Architecture
 ```
@@ -52,7 +52,8 @@ swipl -g run_tests -t halt prolog/tests/test_routes.pl
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload      # API docs at http://localhost:8000/docs
+python3 -m pytest                 # needs the database running for the API tests
 ```
 
 ### Mobile
