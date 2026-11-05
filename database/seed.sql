@@ -6,12 +6,12 @@
 
 BEGIN;
 
-INSERT INTO stops (name, landmark, lat, lng, data_source) VALUES
-  ('Sample Stop A', 'placeholder', 7.0700, 125.6100, 'PLACEHOLDER'),
-  ('Sample Stop B', 'placeholder', 7.0730, 125.6125, 'PLACEHOLDER'),
-  ('Sample Stop C', 'placeholder', 7.0760, 125.6150, 'PLACEHOLDER'),
-  ('Sample Stop D', 'placeholder', 7.0790, 125.6130, 'PLACEHOLDER'),
-  ('Sample Stop E', 'placeholder', 7.0820, 125.6110, 'PLACEHOLDER');
+INSERT INTO stops (name, landmark, lat, lng, data_source, is_landmark) VALUES
+  ('Sample Stop A', 'placeholder', 7.0700, 125.6100, 'PLACEHOLDER', TRUE),
+  ('Sample Stop B', 'placeholder', 7.0730, 125.6125, 'PLACEHOLDER', TRUE),
+  ('Sample Stop C', 'placeholder', 7.0760, 125.6150, 'PLACEHOLDER', TRUE),
+  ('Sample Stop D', 'placeholder', 7.0790, 125.6130, 'PLACEHOLDER', TRUE),
+  ('Sample Stop E', 'placeholder', 7.0820, 125.6110, 'PLACEHOLDER', TRUE);
 
 INSERT INTO routes (code, name, color, is_bidirectional, data_source) VALUES
   ('R01', 'Sample Route 1 (A - C)', '#E53935', TRUE,  'PLACEHOLDER'),

@@ -12,8 +12,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
-from . import geo, ranking
+from . import directions, geo, ranking
 from .config import Settings
+from .directions import NOWHERE, Place
 from .fare_calc import FareRule, total_fare
 from .fares import FareStrategy, strategy_for
 
@@ -30,6 +31,7 @@ class Stop:
     lat: float
     lng: float
     landmark: str | None = None
+    is_landmark: bool = False     # a name commuters recognise; used in directions
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,8 @@ class RideSegment(Segment):
     stops: tuple[Stop, ...]
     distance_km: Decimal
     fare: Decimal | None          # None when no real fare rule is available
+    board_place: Place = NOWHERE  # how to describe where to board / get off
+    alight_place: Place = NOWHERE
     kind: str = field(default="ride", init=False)
 
     @property
@@ -116,9 +120,8 @@ class RideSegment(Segment):
             "kind": self.kind,
             "route": {"code": self.route.code, "name": self.route.name,
                       "color": self.route.color, "vehicle_type": self.route.vehicle_type},
-            "board": _stop_dict(self.board),
-            "alight": _stop_dict(self.alight),
-            "num_stops": len(self.stops) - 1,
+            "board": {**_stop_dict(self.board), "place": self.board_place.to_dict()},
+            "alight": {**_stop_dict(self.alight), "place": self.alight_place.to_dict()},
             "distance_km": float(self.distance_km),
             "fare": float(self.fare) if self.fare is not None else None,
             "path": [{"lat": st.lat, "lng": st.lng} for st in self.stops],
@@ -175,7 +178,8 @@ class Trip:
             "minutes": round(self.minutes),
             "total_fare": float(fare) if fare is not None else None,
             "fare_available": fare is not None,
-            "segments": [s.to_dict() for s in self.segments],
+            "segments": [{**s.to_dict(), "instruction": text}
+                         for s, text in zip(self.segments, directions.trip_instructions(self.segments))],
         }
 
 
@@ -191,6 +195,7 @@ class TripPlanner:
         self.network = network
         self.finder = finder
         self.settings = settings
+        self.landmarks = tuple(s for s in network.stops.values() if s.is_landmark)
 
     def nearby_stops(self, point: geo.LatLng) -> tuple[tuple[Stop, float], ...]:
         s = self.settings
@@ -219,15 +224,19 @@ class TripPlanner:
         strategy = self._strategy(route, rider_type)
         fare = None if strategy is None or strategy.is_placeholder else strategy.fare_for(km)
         stops = tuple(self.network.stops[i] for i in stop_ids)
-        return RideSegment(route=route, stops=stops, distance_km=km, fare=fare)
+        return RideSegment(route=route, stops=stops, distance_km=km, fare=fare,
+                           board_place=directions.place_for(stops[0], self.landmarks),
+                           alight_place=directions.place_for(stops[-1], self.landmarks))
 
     def _build_trip(self, raw_plan: list[RawRide], origin: geo.LatLng, destination: geo.LatLng,
                     starts: Mapping[int, float], ends: Mapping[int, float],
                     rider_type: str) -> Trip:
         rides = [self._ride(r, rider_type) for r in raw_plan]
         first, last = rides[0].board, rides[-1].alight
-        walk_in = WalkSegment("Your location", first.name,
+        board_label = directions.place_label(rides[0].board_place, rides[0].route)
+        alight_label = directions.place_label(rides[-1].alight_place, rides[-1].route)
+        walk_in = WalkSegment("Your location", board_label,
                               (origin, geo.LatLng(first.lat, first.lng)), starts[first.id])
-        walk_out = WalkSegment(last.name, "Destination",
+        walk_out = WalkSegment(alight_label, "Destination",
                                (geo.LatLng(last.lat, last.lng), destination), ends[last.id])
         return Trip(segments=(walk_in, *rides, walk_out), settings=self.settings)
