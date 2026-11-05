@@ -71,7 +71,7 @@ def heading(route: Route, forward: bool) -> str | None:
 
 def place_label(place: Place, route: Route) -> str:
     """Short label for a boarding/alighting point, e.g. on a walking segment."""
-    return {"at": place.name, "near": f"near {place.name}", "none": f"{route.code} route"}[place.kind]
+    return {"at": place.name, "near": f"near {place.name}", "none": f"{route.name} route"}[place.kind]
 
 
 def distance_text(metres: float) -> str:
@@ -80,14 +80,16 @@ def distance_text(metres: float) -> str:
 
 
 def route_label(route: Route) -> str:
-    return f"{route.code} ({route.name})"
+    """How directions name a route: the name commuters read on the jeepney.
+    (The short code is shown on the colored badge instead.)"""
+    return route.name
 
 
 def walk_to_ride(distance_m: float, route: Route, board: Place) -> str:
     target = {
-        "at": f"the {route.code} route at {board.name}",
-        "near": f"the {route.code} route near {board.name}",
-        "none": f"the {route.code} route",
+        "at": f"the {route_label(route)} route at {board.name}",
+        "near": f"the {route_label(route)} route near {board.name}",
+        "none": f"the {route_label(route)} route",
     }[board.kind]
     return f"Walk {distance_text(distance_m)} to {target}"
 

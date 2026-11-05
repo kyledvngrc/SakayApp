@@ -107,9 +107,9 @@ def test_ride_path_follows_the_line():
 def test_instructions_use_landmarks_and_heading():
     trip = make_planner().plan(at(0, 500), at(1500, 2100))[0].to_dict()
     texts = [seg["instruction"] for seg in trip["segments"]]
-    assert texts[0] == "Walk 10 m to the NS route"
-    assert texts[1] == "Ride NS (Plaza - Market) toward Market and get off at City Hall, about 1.5 km"
-    assert texts[2] == "Transfer to EW (West - East) toward East and get off near East Gate, about 1.5 km"
+    assert texts[0] == "Walk 10 m to the Plaza - Market route"
+    assert texts[1] == "Ride Plaza - Market toward Market and get off at City Hall, about 1.5 km"
+    assert texts[2] == "Transfer to West - East toward East and get off near East Gate, about 1.5 km"
     assert texts[3].startswith("Walk ") and texts[3].endswith(" to your destination")
     assert "minutes" not in trip
 

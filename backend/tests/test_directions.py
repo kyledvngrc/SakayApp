@@ -38,20 +38,20 @@ def test_distance_text():
 
 def test_ride_instruction():
     assert dr.ride(ROUTE, Place("at", "SM Ecoland"), D("1.72"), False) == \
-        "Ride R03 (Toril - Bankerohan) and get off at SM Ecoland, about 1.7 km"
+        "Ride Toril - Bankerohan and get off at SM Ecoland, about 1.7 km"
     assert dr.ride(ROUTE, Place("near", "Ateneo"), D("0.43"), True, "Toril") == \
-        "Transfer to R03 (Toril - Bankerohan) toward Toril and get off near Ateneo, about 430 m"
+        "Transfer to Toril - Bankerohan toward Toril and get off near Ateneo, about 430 m"
     assert dr.ride(ROUTE, dr.NOWHERE, D("2.0"), False) == \
-        "Ride R03 (Toril - Bankerohan) and get off after about 2.0 km"
+        "Ride Toril - Bankerohan and get off after about 2.0 km"
 
 
 def test_walk_instructions():
-    assert dr.walk_to_ride(250, ROUTE, Place("at", "SM Ecoland")) == "Walk 250 m to the R03 route at SM Ecoland"
-    assert dr.walk_to_ride(250, ROUTE, Place("near", "Ateneo")) == "Walk 250 m to the R03 route near Ateneo"
-    assert dr.walk_to_ride(250, ROUTE, dr.NOWHERE) == "Walk 250 m to the R03 route"
+    assert dr.walk_to_ride(250, ROUTE, Place("at", "SM Ecoland")) == "Walk 250 m to the Toril - Bankerohan route at SM Ecoland"
+    assert dr.walk_to_ride(250, ROUTE, Place("near", "Ateneo")) == "Walk 250 m to the Toril - Bankerohan route near Ateneo"
+    assert dr.walk_to_ride(250, ROUTE, dr.NOWHERE) == "Walk 250 m to the Toril - Bankerohan route"
     assert dr.walk_to_destination(118) == "Walk 120 m to your destination"
 
 
 def test_place_label():
     assert dr.place_label(Place("near", "Ateneo"), ROUTE) == "near Ateneo"
-    assert dr.place_label(dr.NOWHERE, ROUTE) == "R03 route"
+    assert dr.place_label(dr.NOWHERE, ROUTE) == "Toril - Bankerohan route"
