@@ -12,10 +12,10 @@ except psycopg2.OperationalError:
 
 from app.main import app  # noqa: E402
 
-# Sample network from conftest.py (test database only):
-# R01 A(1)-B(2)-C(3), R02 C(3)-D(4)-E(5); fare rule is a placeholder.
-A = {"lat": 7.0700, "lng": 125.6100}
-E = {"lat": 7.0820, "lng": 125.6110}
+# Sample network from conftest.py (test database only): R01 runs north to a
+# corner, R02 runs east from it; the fare rule is a placeholder.
+A = {"lat": 7.0700, "lng": 125.6102}            # ~22 m east of where R01 starts
+E = {"lat": 7.0801, "lng": 125.6200}            # ~11 m north of where R02 ends
 
 
 @pytest.fixture(scope="module")
@@ -26,21 +26,22 @@ def client():
 
 def test_health(client):
     body = client.get("/health").json()
-    assert body["status"] == "ok" and body["stops"] == 5 and body["routes"] == 2
+    assert body["status"] == "ok" and body["routes"] == 2 and body["landmarks"] == 2
+    assert body["transfer_points"] >= 2                         # R01 <-> R02 at the corner
 
 
-def test_routes_and_stops(client):
+def test_routes_and_landmarks(client):
     routes = {r["code"]: r for r in client.get("/routes").json()}
     assert set(routes) == {"R01", "R02"}
-    assert len(routes["R01"]["stop_ids"]) == 3
-    detail = client.get("/routes/R01").json()
-    assert [s["name"] for s in detail["stops"]] == ["Sample Stop A", "Sample Stop B", "Sample Stop C"]
+    assert routes["R01"]["kind"] == "both" and routes["R01"]["length_km"] == pytest.approx(1.11, abs=0.01)
+    assert client.get("/routes/R01").json()["path_geojson"]["type"] == "LineString"
     assert client.get("/routes/NOPE").status_code == 404
+    assert {lm["name"] for lm in client.get("/landmarks").json()} == {"Sample Corner", "Sample Plaza"}
 
 
-def test_nearby(client):
-    found = client.get("/stops/nearby", params=A).json()
-    assert found[0]["name"] == "Sample Stop A" and found[0]["distance_m"] == 0
+def test_nearby_routes(client):
+    found = client.get("/routes/nearby", params=A).json()
+    assert [r["code"] for r in found] == ["R01"] and found[0]["walk_m"] == 22
 
 
 def test_plan_with_transfer(client):
@@ -48,11 +49,11 @@ def test_plan_with_transfer(client):
     best = body["trips"][0]
     assert best["route_codes"] == ["R01", "R02"] and best["transfers"] == 1
     assert best["fare_available"] is False and best["total_fare"] is None   # placeholder fare
-    assert body["notice"] is None
+    assert body["notice"] is None and "minutes" not in best
     texts = [seg["instruction"] for seg in best["segments"]]
-    assert texts == ["Walk 10 m to Sample Stop A",
-                     "Ride R01 (Sample Route 1 (A - C)) and get off at Sample Stop C, about 860 m",
-                     "Transfer to R02 (Sample Route 2 (C - E)) and get off at Sample Stop E, about 800 m",
+    assert texts == ["Walk 20 m to the R01 route at Sample Plaza",
+                     "Ride R01 (Plaza - Corner) toward Corner and get off at Sample Corner, about 1.1 km",
+                     "Transfer to R02 (Corner - East End) toward East End and get off after about 1.1 km",
                      "Walk 10 m to your destination"]
 
 
@@ -60,6 +61,12 @@ def test_plan_far_away(client):
     body = client.post("/trips/plan", json={"origin": {"lat": 7.2, "lng": 125.6},
                                             "destination": E}).json()
     assert body["trips"] == [] and "starting point" in body["notice"]
+
+
+def test_plan_within_walking_distance(client):
+    body = client.post("/trips/plan", json={"origin": A,
+                                            "destination": {"lat": 7.0720, "lng": 125.6100}}).json()
+    assert body["notice"] == "Your destination is within walking distance."
 
 
 @pytest.mark.parametrize("payload", [

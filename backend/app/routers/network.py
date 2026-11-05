@@ -1,4 +1,4 @@
-"""Read-only stop and route endpoints.                     (IMPERATIVE PARADIGM)"""
+"""Read-only route and landmark endpoints.                 (IMPERATIVE PARADIGM)"""
 
 from __future__ import annotations
 
@@ -10,37 +10,39 @@ from ..geo import LatLng
 router = APIRouter(tags=["network"])
 
 
-def _stop(s) -> dict:
-    return {"id": s.id, "name": s.name, "landmark": s.landmark, "is_landmark": s.is_landmark,
-            "lat": s.lat, "lng": s.lng}
-
-
-def _route(r) -> dict:
+def route_dict(r) -> dict:
     return {"code": r.code, "name": r.name, "color": r.color, "vehicle_type": r.vehicle_type,
-            "is_bidirectional": r.is_bidirectional, "stop_ids": list(r.stop_ids),
-            "path_geojson": r.path_geojson}
+            "is_bidirectional": r.is_bidirectional, "kind": r.kind,
+            "length_km": round(r.length_m / 1000, 2), "path_geojson": r.to_geojson()}
 
 
-@router.get("/stops")
-def list_stops() -> list[dict]:
-    return [_stop(s) for s in services.planner().network.stops.values()]
-
-
-@router.get("/stops/nearby")
-def nearby_stops(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)) -> list[dict]:
-    found = services.planner().nearby_stops(LatLng(lat, lng))
-    return [{**_stop(s), "distance_m": round(d)} for s, d in found]
+def landmark_dict(lm) -> dict:
+    return {"id": lm.id, "name": lm.name, "description": lm.description,
+            "lat": lm.lat, "lng": lm.lng}
 
 
 @router.get("/routes")
 def list_routes() -> list[dict]:
-    return [_route(r) for r in services.planner().network.routes.values()]
+    return [route_dict(r) for r in services.planner().network.routes.values()]
+
+
+@router.get("/routes/nearby")
+def nearby_routes(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)) -> list[dict]:
+    """Routes passing within walking distance, nearest first, with where to catch them."""
+    found = services.planner().nearby_routes(LatLng(lat, lng))
+    return [{"code": r.code, "name": r.name, "color": r.color, "kind": r.kind,
+             "walk_m": round(a.walk_m), "catch_at": {"lat": a.point.lat, "lng": a.point.lng}}
+            for r, a in found]
 
 
 @router.get("/routes/{code}")
 def get_route(code: str) -> dict:
-    network = services.planner().network
-    route = network.routes.get(code)
+    route = services.planner().network.routes.get(code)
     if route is None:
         raise HTTPException(status_code=404, detail=f"route {code} not found")
-    return {**_route(route), "stops": [_stop(network.stops[i]) for i in route.stop_ids]}
+    return route_dict(route)
+
+
+@router.get("/landmarks")
+def list_landmarks() -> list[dict]:
+    return [landmark_dict(lm) for lm in services.planner().network.landmarks]

@@ -1,4 +1,4 @@
-"""Admin API tests against the live database. Creates and removes its own data."""
+"""Admin API tests against the test database. Creates and removes its own data."""
 import psycopg2
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +14,8 @@ from app import auth, db  # noqa: E402
 from app.main import app  # noqa: E402
 
 EMAIL, PASSWORD = "pytest-admin@example.test", "pytest-password-123"
-D = 0.0018                     # ~200 m of latitude
+D = 0.0018                     # ~200 m
+LAT0, LNG0 = 7.0950, 125.6300  # away from the sample routes
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +31,7 @@ def client():
         yield c
     with db.transaction() as cur:
         cur.execute("DELETE FROM routes WHERE code LIKE 'PYT%'")
-        cur.execute("DELETE FROM stops WHERE name LIKE 'pytest %'")
+        cur.execute("DELETE FROM landmarks WHERE name LIKE 'pytest %'")
         cur.execute("DELETE FROM fare_rules WHERE source LIKE 'pytest%'")
         cur.execute("DELETE FROM users WHERE email LIKE 'pytest-%'")
     from app import services
@@ -43,15 +44,25 @@ def headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
+def pt(north=0.0, east=0.0):
+    return {"lat": LAT0 + north * D, "lng": LNG0 + east * D}
+
+
 def route_body(code="PYT1", **over):
-    lat0, lng = 7.0950, 125.6300                     # away from the seed stops
-    body = {
-        "code": code, "name": "pytest route", "color": "#123456",
-        "path": [{"lat": lat0, "lng": lng}, {"lat": lat0 + 3 * D, "lng": lng}],
-        "stops": [{"name": f"pytest {code} s{i}", "lat": lat0 + i * D, "lng": lng} for i in range(4)],
-        "data_source": "pytest", "collected_on": "2026-11-05",
-    }
+    body = {"code": code, "name": "pytest - route", "color": "#123456",
+            "path": [pt(0), pt(3)],                                    # ~600 m north
+            "data_source": "pytest", "collected_on": "2026-11-05"}
     return {**body, **over}
+
+
+def plan(client, origin, destination, **extra):
+    return client.post("/trips/plan?log_search=false",
+                       json={"origin": origin, "destination": destination, **extra}).json()
+
+
+def admin_route(client, headers, code):
+    return next(r for r in client.get("/admin/data", headers=headers).json()["routes"]
+                if r["code"] == code)
 
 
 def test_login_rules(client):
@@ -76,75 +87,51 @@ def test_create_route_then_plan_trip(client, headers):
     res = client.post("/admin/routes", json=route_body(), headers=headers)
     assert res.status_code == 201, res.text
     assert res.json()["network"]["routes"] == 3
-
-    data = client.get("/admin/data", headers=headers).json()
-    route = next(r for r in data["routes"] if r["code"] == "PYT1")
-    assert len(route["stops"]) == 4 and route["stops"][0]["km"] == 0
-    assert route["total_km"] == pytest.approx(0.6, abs=0.01)       # 3 hops x ~200 m along the line
-
-    plan = client.post("/trips/plan?log_search=false", json={
-        "origin": {"lat": 7.0950, "lng": 125.6300},
-        "destination": {"lat": 7.0950 + 3 * D, "lng": 125.6300}}).json()
-    assert plan["trips"][0]["route_codes"] == ["PYT1"]
+    route = admin_route(client, headers, "PYT1")
+    assert route["length_km"] == pytest.approx(0.6, abs=0.01) and route["kind"] == "both"
+    assert plan(client, pt(0.2), pt(2.8))["trips"][0]["route_codes"] == ["PYT1"]
 
 
-def test_second_route_reuses_stop_for_transfer(client, headers):
-    data = client.get("/admin/data", headers=headers).json()
-    route1 = next(r for r in data["routes"] if r["code"] == "PYT1")
-    shared_id = route1["stops"][-1]["id"]
-    shared = next(s for s in data["stops"] if s["id"] == shared_id)
-    body = route_body("PYT2", path=[], stops=[
-        {"id": shared_id},
-        {"name": "pytest PYT2 east", "lat": shared["lat"], "lng": shared["lng"] + 4 * D}])   # ~800 m: too far to walk
+def test_crossing_route_gives_transfer(client, headers):
+    body = route_body("PYT2", path=[pt(2.9, -3), pt(2.9, 3)], is_bidirectional=False)   # east, crosses PYT1
     assert client.post("/admin/routes", json=body, headers=headers).status_code == 201
-
-    plan = client.post("/trips/plan?log_search=false", json={
-        "origin": {"lat": 7.0950, "lng": 125.6300},
-        "destination": {"lat": shared["lat"], "lng": shared["lng"] + 4 * D}}).json()
-    assert plan["trips"][0]["route_codes"] == ["PYT1", "PYT2"]
+    assert admin_route(client, headers, "PYT2")["kind"] == "oneway"
+    data = client.get("/admin/data", headers=headers).json()
+    assert any(t["from"] == "PYT1" and t["to"] == "PYT2" and t["walk_m"] < 20
+               for t in data["transfer_points"])
+    trip = plan(client, pt(0), pt(2.9, 2.8))["trips"][0]
+    assert trip["route_codes"] == ["PYT1", "PYT2"]
+    assert plan(client, pt(2.9, 2.8), pt(2.9, -2.8))["trips"] == []        # PYT2 runs east only
 
 
 def test_update_route_and_deactivate(client, headers):
-    data = client.get("/admin/data", headers=headers).json()
-    route = next(r for r in data["routes"] if r["code"] == "PYT2")
-    body = route_body("PYT2", path=[], is_active=False,
-                      stops=[{"id": s["id"]} for s in route["stops"]])
+    route = admin_route(client, headers, "PYT2")
+    body = route_body("PYT2", path=[pt(2.9, -3), pt(2.9, 3)], is_active=False)
     res = client.put(f"/admin/routes/{route['id']}", json=body, headers=headers)
-    assert res.status_code == 200 and res.json()["network"]["routes"] == 3     # 2 seed + PYT1
+    assert res.status_code == 200 and res.json()["network"]["routes"] == 3     # 2 sample + PYT1
     assert "PYT2" not in {r["code"] for r in client.get("/routes").json()}
+    assert admin_route(client, headers, "PYT2")["kind"] is None                # not planned
 
 
 def test_route_validation(client, headers):
     assert client.post("/admin/routes", json=route_body("bad code"), headers=headers).status_code == 422
-    one_stop = route_body("PYT3", stops=[{"name": "pytest x", "lat": 7.1, "lng": 125.6}])
-    assert client.post("/admin/routes", json=one_stop, headers=headers).status_code == 422
-    dup = route_body("PYT3", stops=[{"id": 1}, {"id": 1}])
-    assert client.post("/admin/routes", json=dup, headers=headers).status_code == 422
-    missing = route_body("PYT3", stops=[{"id": 1}, {"id": 999999}])
-    assert client.post("/admin/routes", json=missing, headers=headers).status_code == 422
+    assert client.post("/admin/routes", json=route_body("PYT3", path=[pt(0)]), headers=headers).status_code == 422
     assert client.post("/admin/routes", json=route_body("PYT1"), headers=headers).status_code == 409
+    assert client.put("/admin/routes/999999", json=route_body("PYT9"), headers=headers).status_code == 404
 
 
-def test_moving_a_stop_updates_distances(client, headers):
-    data = client.get("/admin/data", headers=headers).json()
-    route = next(r for r in data["routes"] if r["code"] == "PYT2")     # no path: straight lines
-    moved = route["stops"][1]["id"]
-    stop = next(s for s in data["stops"] if s["id"] == moved)
-    assert client.patch(f"/admin/stops/{moved}", json={"lng": stop["lng"] + D},
+def test_landmark_lifecycle_and_directions(client, headers):
+    res = client.post("/admin/landmarks", json={"name": "pytest Gate", **pt(3)}, headers=headers)
+    assert res.status_code == 201
+    landmark_id = res.json()["id"]
+    texts = [s["instruction"] for s in plan(client, pt(0.2), pt(2.9))["trips"][0]["segments"]]
+    assert "get off at pytest Gate" in texts[1]
+    assert client.patch(f"/admin/landmarks/{landmark_id}", json={"name": "pytest Main Gate"},
                         headers=headers).status_code == 200
-    data = client.get("/admin/data", headers=headers).json()
-    after = next(r for r in data["routes"] if r["code"] == "PYT2")
-    assert after["total_km"] == pytest.approx(5 / 4 * route["total_km"], rel=0.02)   # 4D east -> 5D east
-
-
-def test_stop_in_use_cannot_be_deleted(client, headers):
-    data = client.get("/admin/data", headers=headers).json()
-    used = next(r for r in data["routes"] if r["code"] == "PYT1")["stops"][0]["id"]
-    assert client.delete(f"/admin/stops/{used}", headers=headers).status_code == 409
-    new = client.post("/admin/stops", json={"name": "pytest lonely", "lat": 7.11, "lng": 125.64},
-                      headers=headers).json()["id"]
-    assert client.delete(f"/admin/stops/{new}", headers=headers).status_code == 204
-    assert client.delete(f"/admin/stops/{new}", headers=headers).status_code == 404
+    texts = [s["instruction"] for s in plan(client, pt(0.2), pt(2.9))["trips"][0]["segments"]]
+    assert "get off at pytest Main Gate" in texts[1]
+    assert client.delete(f"/admin/landmarks/{landmark_id}", headers=headers).status_code == 204
+    assert client.delete(f"/admin/landmarks/{landmark_id}", headers=headers).status_code == 404
 
 
 def test_fare_rule_lifecycle(client, headers):
@@ -152,16 +139,13 @@ def test_fare_rule_lifecycle(client, headers):
     body = {"vehicle_type": "jeepney", "base_fare": "10.00", "base_km": "4", "per_km_rate": "1.50",
             "discount_rate": "0.2", "effective_date": "2001-01-01", "source": "pytest fixture"}
     rule_id = client.post("/admin/fare-rules", json=body, headers=headers).json()["id"]
-    plan = client.post("/trips/plan?log_search=false", json={
-        "origin": {"lat": 7.0950, "lng": 125.6300},
-        "destination": {"lat": 7.0950 + 3 * D, "lng": 125.6300}, "rider_type": "student"}).json()
-    assert plan["trips"][0]["total_fare"] == 8.0 and plan["fare_source"] == "pytest fixture"
+    result = plan(client, pt(0.2), pt(2.8), rider_type="student")
+    assert result["trips"][0]["total_fare"] == 8.0 and result["fare_source"] == "pytest fixture"
     assert client.post("/admin/fare-rules", json=body, headers=headers).status_code == 409
     assert client.delete(f"/admin/fare-rules/{rule_id}", headers=headers).status_code == 204
 
 
 def test_delete_route(client, headers):
-    data = client.get("/admin/data", headers=headers).json()
-    route = next(r for r in data["routes"] if r["code"] == "PYT1")
+    route = admin_route(client, headers, "PYT1")
     assert client.delete(f"/admin/routes/{route['id']}", headers=headers).status_code == 204
     assert client.delete(f"/admin/routes/{route['id']}", headers=headers).status_code == 404

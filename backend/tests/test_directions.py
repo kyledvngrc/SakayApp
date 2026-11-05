@@ -2,27 +2,32 @@ from decimal import Decimal as D
 
 from app import directions as dr
 from app.directions import Place
-from app.models import Route, Stop
+from app.models import Landmark, Route
 
-ROUTE = Route("R03", "Toril - Bankerohan", "#E53935", "jeepney", True, ())
-MALL = Stop(1, "SM Ecoland", 7.0500, 125.6000, is_landmark=True)
-SCHOOL = Stop(2, "Ateneo", 7.0700, 125.6000, is_landmark=True)
-GENERIC_NEAR = Stop(3, "R03 stop 7", 7.0518, 125.6000)      # ~200 m from the mall
-GENERIC_FAR = Stop(4, "R03 stop 9", 7.0600, 125.6000)       # ~1.1 km from both
+from .lines import at, line
+
+ROUTE = Route.from_line("R03", "Toril - Bankerohan", "#E53935", "jeepney", True,
+                        line((0, 0), (0, 1000)), 100)
+ONE_WAY = Route.from_line("R04", "Toril - Bankerohan", "#E53935", "jeepney", False,
+                          line((0, 0), (0, 1000)), 100)
+MALL = Landmark(1, "SM Ecoland", *at(0, 0))
+SCHOOL = Landmark(2, "Ateneo", *at(0, 2000))
 LANDMARKS = (MALL, SCHOOL)
 
 
-def test_place_at_landmark():
-    assert dr.place_for(MALL, LANDMARKS) == Place("at", "SM Ecoland")
+def test_place_at_near_and_none():
+    assert dr.place_for(at(20, 0), LANDMARKS) == Place("at", "SM Ecoland")
+    assert dr.place_for(at(0, 200), LANDMARKS) == Place("near", "SM Ecoland")
+    assert dr.place_for(at(0, 1000), LANDMARKS) == dr.NOWHERE
+    assert dr.place_for(at(0, 0), ()) == dr.NOWHERE
 
 
-def test_place_near_closest_landmark():
-    assert dr.place_for(GENERIC_NEAR, LANDMARKS) == Place("near", "SM Ecoland")
-
-
-def test_place_none_when_no_landmark_close():
-    assert dr.place_for(GENERIC_FAR, LANDMARKS) == dr.NOWHERE
-    assert dr.place_for(GENERIC_NEAR, ()) == dr.NOWHERE
+def test_heading_from_route_name():
+    assert dr.heading(ROUTE, forward=True) == "Bankerohan"
+    assert dr.heading(ROUTE, forward=False) == "Toril"
+    assert dr.heading(ONE_WAY, forward=True) is None
+    plain = Route.from_line("X", "Bangkal", "#000000", "jeepney", True, line((0, 0), (0, 9)), 100)
+    assert dr.heading(plain, True) is None
 
 
 def test_distance_text():
@@ -31,17 +36,17 @@ def test_distance_text():
     assert dr.distance_text(1720) == "1.7 km"
 
 
-def test_ride_instruction_never_counts_stops():
+def test_ride_instruction():
     assert dr.ride(ROUTE, Place("at", "SM Ecoland"), D("1.72"), False) == \
         "Ride R03 (Toril - Bankerohan) and get off at SM Ecoland, about 1.7 km"
-    assert dr.ride(ROUTE, Place("near", "Ateneo"), D("0.43"), True) == \
-        "Transfer to R03 (Toril - Bankerohan) and get off near Ateneo, about 430 m"
+    assert dr.ride(ROUTE, Place("near", "Ateneo"), D("0.43"), True, "Toril") == \
+        "Transfer to R03 (Toril - Bankerohan) toward Toril and get off near Ateneo, about 430 m"
     assert dr.ride(ROUTE, dr.NOWHERE, D("2.0"), False) == \
         "Ride R03 (Toril - Bankerohan) and get off after about 2.0 km"
 
 
 def test_walk_instructions():
-    assert dr.walk_to_ride(250, ROUTE, Place("at", "SM Ecoland")) == "Walk 250 m to SM Ecoland"
+    assert dr.walk_to_ride(250, ROUTE, Place("at", "SM Ecoland")) == "Walk 250 m to the R03 route at SM Ecoland"
     assert dr.walk_to_ride(250, ROUTE, Place("near", "Ateneo")) == "Walk 250 m to the R03 route near Ateneo"
     assert dr.walk_to_ride(250, ROUTE, dr.NOWHERE) == "Walk 250 m to the R03 route"
     assert dr.walk_to_destination(118) == "Walk 120 m to your destination"

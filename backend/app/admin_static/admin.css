@@ -101,18 +101,6 @@ label.check { display: flex; align-items: center; gap: 6px; color: var(--text); 
 .notice { background: var(--warn-bg); color: var(--warn-text); padding: 8px 10px; border-radius: 6px; margin: 8px 0; }
 .hint { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
 
-.stop-list { list-style: none; margin: 0; padding: 0; counter-reset: stop; }
-.stop-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
-.stop-list .num {
-  flex: 0 0 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
-  font-size: 11px; font-weight: 600; color: #fff;
-}
-.stop-list input { padding: 3px 6px; }
-.stop-list .far { color: var(--danger); font-size: 11px; }
-.stop-list .shared { font-size: 11px; color: var(--muted); }
-.stop-list .star { font-size: 15px; color: var(--muted); }
-.stop-list .star.on { color: #f2a900; outline: none; }
-
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--border); }
 

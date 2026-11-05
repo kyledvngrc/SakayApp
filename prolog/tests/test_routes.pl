@@ -6,93 +6,83 @@
 :- use_module('../routes').
 :- use_module(library(plunit)).
 
-%  Builds a network from a list of route(Code, Stops, bidirectional|oneway).
-load(Routes) :-
-    clear_legs,
-    forall(member(route(R, Stops, Dir), Routes), add_route(R, Stops, Dir)).
+load(Routes, Links) :-
+    clear_network,
+    forall(member(R, Routes), assertz(routes:R)),
+    forall(member(L, Links), assertz(routes:L)).
 
-add_route(R, Stops, Dir) :-
-    forall(nextto(A, B, Stops),
-           ( assertz(routes:leg(R, A, B)),
-             ( Dir == bidirectional -> assertz(routes:leg(R, B, A)) ; true ) )).
+%  A (both ways, 2 km) crosses B (both ways, 1.5 km) at A 1500 / B 300.
+%  C (one way, 1 km) starts 80 m walk from B at 1200.
+crossing_network :-
+    load([ route('A', both, 2000), route('B', both, 1500), route('C', oneway, 1000) ],
+         [ link('A', 1500, 'B', 300, 0),  link('B', 300, 'A', 1500, 0),
+           link('B', 1200, 'C', 0, 80),   link('C', 0, 'B', 1200, 80) ]).
 
-%  Same shape as database/seed.sql: R01 1-2-3, R02 3-4-5, transfer at 3.
-seed_network :-
-    load([ route('R01', [1,2,3], bidirectional),
-           route('R02', [3,4,5], bidirectional) ]).
+plans(Starts, Goals, Max, Plans) :-
+    findall(P, find_trip(Starts, Goals, Max, P, _), Plans).
 
-all_plans(From, To, Max, Plans) :-
-    findall(P, find_trip(From, To, Max, P, _), Plans).
+:- begin_tests(rides, [cleanup(clear_network)]).
 
-:- begin_tests(seed, [setup(seed_network), cleanup(clear_legs)]).
+test(both_ways, [setup(crossing_network), true(M1-M2 == 500-500)]) :-
+    ride('A', 1000, 1500, M1),
+    ride('A', 1500, 1000, M2).
 
-test(direct_ride, [nondet]) :-
-    find_trip(1, 3, Plan, 0),
-    Plan == [ride('R01', 1, 3, [1,2,3])].
+test(oneway_forward_only, [setup(crossing_network), fail]) :-
+    ride('C', 600, 100, _).
 
-test(one_transfer, [true(Plans == [[ride('R01',1,3,[1,2,3]), ride('R02',3,5,[3,4,5])]])]) :-
-    all_plans(1, 5, 2, Plans).
+test(loop_wraps_around, [setup(load([route('L', loop, 3000)], [])), true(M == 700)]) :-
+    ride('L', 2800, 500, M).
 
-test(reverse_direction, [nondet]) :-
-    find_trip(5, 1, Plan, 1),
-    Plan == [ride('R02',5,3,[5,4,3]), ride('R01',3,1,[3,2,1])].
+test(no_zero_length_ride, [setup(crossing_network), fail]) :-
+    ride('A', 700, 700, _).
 
-test(same_stop_fails, [fail]) :-
-    find_trip(2, 2, _, _).
+:- end_tests(rides).
 
-test(unknown_stop_fails, [fail]) :-
-    find_trip(1, 99, _, _).
+:- begin_tests(trips, [setup(crossing_network), cleanup(clear_network)]).
 
-test(transfer_stop_detected, [nondet]) :-
-    transfer_stop(3).
+test(direct, [true(Plans == [[leg('A', 100, 900, 800, 0)]])]) :-
+    plans([s('A', 100, 50)], [g('A', 900, 20)], 2, Plans).
 
-test(non_transfer_stop, [fail]) :-
-    transfer_stop(2).
+test(one_transfer_where_lines_cross,
+     [true(Plans == [[leg('A', 100, 1500, 1400, 0), leg('B', 300, 1000, 700, 0)]])]) :-
+    plans([s('A', 100, 50)], [g('B', 1000, 20)], 2, Plans).
 
-test(from_any_candidate, [nondet]) :-
-    find_trips_from_any([1,2], [5], 2, [ride('R01', 2, 3, _)|_], 1).
+test(two_transfers_with_walk, [nondet]) :-
+    find_trip([s('A', 100, 50)], [g('C', 900, 20)], 2, Plan, 2),
+    Plan == [leg('A', 100, 1500, 1400, 0), leg('B', 300, 1200, 900, 80), leg('C', 0, 900, 900, 0)].
 
-:- end_tests(seed).
+test(transfer_cap, [fail]) :-
+    find_trip([s('A', 100, 50)], [g('C', 900, 20)], 1, _, _).
 
-:- begin_tests(guards, [cleanup(clear_legs)]).
+test(oneway_wrong_direction, [fail]) :-
+    find_trip([s('C', 900, 10)], [g('C', 100, 10)], 2, _, _).
 
-test(circular_route_terminates, [setup(load([route('C1', [10,11,12,13,10], oneway)])),
-                                 true(Plans == [[ride('C1',10,12,[10,11,12])]])]) :-
-    all_plans(10, 12, 2, Plans).
-
-test(bidirectional_loop_gives_both_ways,
-     [setup(load([route('C2', [10,11,12,13,10], bidirectional)])),
-      true(Paths == [[10,11,12], [10,13,12]])]) :-
-    all_plans(10, 12, 2, Plans),
-    findall(S, member([ride(_,_,_,S)], Plans), Ss),
-    msort(Ss, Paths).
-
-test(oneway_wrong_direction_fails, [setup(load([route('O1', [30,31,32], oneway)])), fail]) :-
-    find_trip(32, 30, _, _).
-
-%  Regression: R01 only arrives at 3 (one-way), R02 leaves from 3.
-test(oneway_transfer, [setup(load([ route('R01', [1,2,3], oneway),
-                                    route('R02', [3,4,5], oneway) ])),
-                       true(Plans == [[ride('R01',1,3,[1,2,3]), ride('R02',3,5,[3,4,5])]])]) :-
-    all_plans(1, 5, 2, Plans).
-
-test(transfer_cap_blocks, [setup(chain_network), fail]) :-
-    find_trip(20, 24, 2, _, _).
-
-test(transfer_cap_allows, [setup(chain_network), nondet]) :-
-    find_trip(20, 24, 3, _, 3).
-
-test(no_route_reused, [setup(load([ route('A', [1,2,3], bidirectional),
-                                     route('B', [2,9], bidirectional) ]))]) :-
-    forall(find_trip(1, 3, 2, Plan, _),
-           ( findall(R, member(ride(R,_,_,_), Plan), Rs),
+test(never_reuses_a_route) :-
+    forall(find_trip([s('A', 100, 0)], [g('A', 1900, 0)], 2, Plan, _),
+           ( findall(R, member(leg(R, _, _, _, _), Plan), Rs),
              sort(Rs, Unique), length(Rs, N), length(Unique, N) )).
 
-:- end_tests(guards).
+test(unknown_route, [true(Plans == [])]) :-
+    plans([s('X', 0, 0)], [g('A', 900, 0)], 2, Plans).
 
-%  4 routes in a chain: reaching 24 from 20 needs 3 transfers.
-chain_network :-
-    load([ route('K1', [20,21], bidirectional),
-           route('K2', [21,22], bidirectional),
-           route('K3', [22,23], bidirectional),
-           route('K4', [23,24], bidirectional) ]).
+:- end_tests(trips).
+
+:- begin_tests(best, [setup(crossing_network), cleanup(clear_network)]).
+
+%  Two places to catch A near the origin: the shorter ride wins.
+test(cheapest_per_route_sequence, [true(Plans == [[leg('A', 600, 900, 300, 0)]])]) :-
+    best_trips([s('A', 100, 0), s('A', 600, 100)], [g('A', 900, 0)], 2, Plans).
+
+%  ...unless walking to it costs more (walking counts 3x).
+test(walking_weighs_more, [true(Plans == [[leg('A', 100, 900, 800, 0)]])]) :-
+    best_trips([s('A', 100, 0), s('A', 600, 200)], [g('A', 900, 0)], 2, Plans).
+
+test(one_plan_per_sequence, [true(Seqs == [['A'], ['A', 'B']])]) :-
+    best_trips([s('A', 100, 0)], [g('A', 1800, 0), g('B', 1000, 0)], 2, Plans),
+    findall(Rs, ( member(P, Plans), findall(R, member(leg(R,_,_,_,_), P), Rs) ), Seqs0),
+    msort(Seqs0, Seqs).
+
+test(cost, [true(Cost == 1640)]) :-
+    plan_cost([leg('A', 100, 1500, 1400, 0)], [s('A', 100, 50)], [g('A', 1500, 30)], Cost).
+
+:- end_tests(best).

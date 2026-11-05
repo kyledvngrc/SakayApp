@@ -21,12 +21,12 @@ def rank_key(trip: Trip) -> tuple:
 
 
 def dedupe_by_routes(trips: Iterable[Trip]) -> tuple[Trip, ...]:
-    """Keep only the quickest trip for each sequence of routes.
+    """Keep only the best trip for each sequence of routes.
 
-    Dense stops produce many near-identical plans (same jeepneys, boarding one
-    stop earlier or later); the commuter only needs the best of each.
+    Plans that ride the same jeepneys but board or transfer a little earlier
+    or later are near-identical; the commuter only needs the best of each.
     """
-    by_routes = sorted(trips, key=lambda t: (t.route_codes, t.minutes))
+    by_routes = sorted(trips, key=lambda t: (t.route_codes, rank_key(t)))
     return tuple(next(group) for _, group in groupby(by_routes, key=lambda t: t.route_codes))
 
 

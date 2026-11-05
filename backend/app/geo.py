@@ -1,14 +1,17 @@
 """Geographic helpers.                                     (FUNCTIONAL PARADIGM)
 
 Pure functions only: no I/O, no mutation. They take plain values and return
-new values, built with map/filter/sorted and lambdas.
+new values, built with map/filter/sorted, comprehensions and lambdas.
+
+A route is a polyline (`path`) drawn along the streets. A position on a route
+is the distance in metres along that line from its first point.
 """
 
 from __future__ import annotations
 
+import bisect
 import math
 from itertools import accumulate
-from decimal import Decimal
 from typing import Iterable, Mapping, NamedTuple, Protocol, Sequence, TypeVar
 
 EARTH_RADIUS_M = 6_371_000.0
@@ -45,16 +48,49 @@ def nearby(points: Iterable[P], center: HasLatLng, radius_m: float,
     return tuple(sorted(within, key=lambda pd: pd[1])[:limit])
 
 
-def path_km(leg_km: Mapping[tuple[str, int, int], Decimal], route_code: str,
-            stop_ids: Sequence[int]) -> Decimal:
-    """Total distance of riding `route_code` through `stop_ids` in order."""
-    hops = zip(stop_ids, stop_ids[1:])
-    return sum(map(lambda hop: leg_km[(route_code, hop[0], hop[1])], hops), Decimal("0"))
+# --- Lines --------------------------------------------------------------------
+
+def cumulative_m(path: Sequence[HasLatLng]) -> tuple[float, ...]:
+    """Metres along `path` to each of its points (first is 0)."""
+    return tuple(accumulate((haversine_m(a, b) for a, b in zip(path, path[1:])), initial=0.0))
 
 
-# --- Distances along a drawn route line -------------------------------------
-# The admin draws each route as a polyline. Stop-to-stop distance is measured
-# along that line (roads curve), falling back to a straight line if needed.
+def point_at(path: Sequence[HasLatLng], cum: Sequence[float], d: float) -> LatLng:
+    """The point `d` metres along `path` (clamped to its ends)."""
+    if d <= 0:
+        return LatLng(path[0].lat, path[0].lng)
+    if d >= cum[-1]:
+        return LatLng(path[-1].lat, path[-1].lng)
+    i = bisect.bisect_right(cum, d) - 1
+    seg = cum[i + 1] - cum[i]
+    t = 0.0 if seg == 0 else (d - cum[i]) / seg
+    a, b = path[i], path[i + 1]
+    return LatLng(a.lat + t * (b.lat - a.lat), a.lng + t * (b.lng - a.lng))
+
+
+def slice_path(path: Sequence[HasLatLng], cum: Sequence[float],
+               start_m: float, end_m: float) -> tuple[LatLng, ...]:
+    """The part of `path` between two positions, in travel order (backwards if
+    end_m < start_m), including the exact end points."""
+    lo, hi = sorted((start_m, end_m))
+    inner = tuple(LatLng(p.lat, p.lng) for p, d in zip(path, cum) if lo < d < hi)
+    forward = (point_at(path, cum, lo), *inner, point_at(path, cum, hi))
+    return forward if start_m <= end_m else tuple(reversed(forward))
+
+
+def is_closed(path: Sequence[HasLatLng], tolerance_m: float) -> bool:
+    """Whether the line ends (about) where it starts, i.e. a loop."""
+    return len(path) > 2 and haversine_m(path[0], path[-1]) <= tolerance_m
+
+
+def sample_line(path: Sequence[HasLatLng], cum: Sequence[float],
+                step_m: float) -> tuple[tuple[float, LatLng], ...]:
+    """(position, point) every `step_m` metres along the line, both ends included."""
+    total = cum[-1]
+    count = max(1, math.ceil(total / step_m))
+    return tuple((total * i / count, point_at(path, cum, total * i / count))
+                 for i in range(count + 1))
+
 
 def _local_xy(origin: HasLatLng, p: HasLatLng) -> tuple[float, float]:
     """Metres east/north of `origin` (equirectangular; accurate at city scale)."""
@@ -76,7 +112,7 @@ def position_along(path: Sequence[HasLatLng], p: HasLatLng) -> tuple[float, floa
     """(metres along `path` to the point nearest p, offset of p from the path in m)."""
     segments = tuple(zip(path, path[1:]))
     lengths = tuple(map(lambda seg: haversine_m(*seg), segments))
-    starts = tuple(accumulate(lengths, initial=0.0))     # metres to the start of each segment
+    starts = tuple(accumulate(lengths, initial=0.0))
 
     def candidate(i: int) -> tuple[float, float]:
         t, offset = _project_on_segment(*segments[i], p)
@@ -84,23 +120,6 @@ def position_along(path: Sequence[HasLatLng], p: HasLatLng) -> tuple[float, floa
 
     return min(map(candidate, range(len(segments))), key=lambda c: c[1],
                default=(0.0, haversine_m(path[0], p)))
-
-
-def stop_distances_km(path: Sequence[HasLatLng] | None,
-                      stops: Sequence[HasLatLng]) -> tuple[Decimal, ...]:
-    """distance_from_prev_km for each stop in order (first is 0).
-
-    Uses distance along `path` when it exists and the stops move forward along
-    it; otherwise the straight-line distance for that hop.
-    """
-    positions = tuple(position_along(path, s)[0] for s in stops) if path and len(path) > 1 else None
-
-    def hop_m(i: int) -> float:
-        along = positions[i] - positions[i - 1] if positions else -1.0
-        return along if along > 0 else haversine_m(stops[i - 1], stops[i])
-
-    return tuple(Decimal("0") if i == 0 else Decimal(str(round(hop_m(i) / 1000, 3)))
-                 for i in range(len(stops)))
 
 
 def geojson_path(geojson: Mapping | None) -> tuple[LatLng, ...] | None:

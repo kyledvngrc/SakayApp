@@ -6,9 +6,9 @@ Built for **UN SDG 11, Target 11.2** (safe, affordable, accessible transport). T
 
 | Paradigm | Where |
 |---|---|
-| Logic | `prolog/routes.pl`: route search over `leg/3` facts |
-| Functional | `backend/app/geo.py`, `fare_calc.py`, `ranking.py`: pure functions (map/filter/reduce, immutable data) |
-| Object-Oriented | `backend/app/models.py`, `fares.py`: `Segment` → `WalkSegment`/`RideSegment`, `Trip`, `TripPlanner`, `FareStrategy` → `RegularFare` → `DiscountedFare` |
+| Logic | `prolog/routes.pl`: trip search over `route/3` and `link/5` facts (where routes connect) |
+| Functional | `backend/app/geo.py`, `connections.py`, `directions.py`, `fare_calc.py`, `ranking.py`: pure functions (map/filter/reduce, immutable data) |
+| Object-Oriented | `backend/app/models.py`, `fares.py`: `Route`, `Network`, `Segment` → `WalkSegment`/`RideSegment`, `Trip`, `TripPlanner`, `FareStrategy` → `RegularFare` → `DiscountedFare` |
 | Imperative | `backend/app/main.py`, `services.py`, `db.py`, `prolog_bridge.py`, `routers/`: startup loading, request handling |
 
 ## Architecture
@@ -39,7 +39,7 @@ docs/       tech justification, paradigms, data sources
 ```bash
 cp .env.example .env        # then edit passwords
 docker compose up -d
-docker compose exec db psql -U sakay -d sakay -c "SELECT * FROM v_legs;"
+docker compose exec db psql -U sakay -d sakay -c "\dt"
 ```
 
 ### Prolog route finder (standalone tests)
@@ -63,10 +63,10 @@ python3 -m app.create_admin you@example.com   # asks for a password (10+ charact
 uvicorn app.main:app --reload
 ```
 Open http://localhost:8000/admin and sign in. To add a route:
-1. **Routes → + New route**: enter a code (letters, digits, `_`, `-`) and a name.
-2. **Draw line**: click along the streets in the direction the jeepney travels. Click an existing stop to pass exactly through it.
-3. **Auto-place**: stops are added every N metres. Existing stops on the line are reused, so routes that meet share a transfer stop. Rename important stops to their landmark.
-4. **Save route**: distances between stops are measured along the line, and the trip planner reloads immediately.
+1. **Routes → + New route**: enter a code (letters, digits, `_`, `-`, e.g. the signboard name) and a name written "Start – End" in the direction you will draw.
+2. **Draw / edit line**: click along the streets in the order the jeepney drives, from S to E. Click on the line to insert a point; right-click a point to delete it. For a one-way loop, finish back at the start.
+3. **Save route**: the planner reloads and finds transfer points (purple dots) where routes cross or pass within 200 m of each other.
+4. Optionally add **Landmarks** (malls, schools, terminals) so directions can say "get off near SM Ecoland".
 5. Check the result in **Test trip** by clicking a start and a destination on the map.
 
 Enter the official LTFRB fare values with their citation under **Fares**. Until a non-placeholder rule exists, the app shows fares as unavailable.
@@ -76,6 +76,22 @@ Enter the official LTFRB fare values with their citation under **Fares**. Until 
 cd mobile
 npm install
 npx expo start
+```
+
+## How trips are planned
+Jeepneys pick up and drop off anywhere, so there are no fixed stops. Each route is the line it drives along.
+1. Find where each route passes within 500 m of the origin and of the destination (one point per pass).
+2. From the lines, find **transfer points**: where two routes cross, or come within a 200 m walk.
+3. Prolog searches route sequences (at most 2 transfers), respecting one-way routes and loops, and keeps the cheapest plan per sequence.
+4. Python builds the trips (walk → ride → (walk) → ride → walk), computes fares by distance ridden, and ranks them: fewest transfers, then fare, then walking, then distance.
+
+Directions use distance and landmarks, not times: waiting and travel times vary too much.
+
+### Upgrading an existing database
+Databases created before the line-based planner need migration 002 (back up first):
+```bash
+docker compose exec -T db pg_dump -U sakay -d sakay > backups/before-002.sql
+docker compose exec -T db psql -U sakay -d sakay < database/migrations/002_line_routing.sql
 ```
 
 ## Data
