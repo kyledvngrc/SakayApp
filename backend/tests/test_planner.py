@@ -11,7 +11,7 @@ from app.models import Landmark, Network, Route, TripPlanner
 from .lines import at, line
 
 S = Settings(walk_radius_m=300)
-RULE = FareRule("jeepney", D("10.00"), D("4"), D("1.50"), D("0.20"), "test fixture", False)
+RULE = FareRule("jeepney", D("10.00"), D("4"), D("1.50"), D("8.00"), D("1.20"), "test fixture", False)
 
 
 def route(code, name, path, both=True):
@@ -84,7 +84,7 @@ def test_fares_per_ride_and_discount():
 
 
 def test_placeholder_or_missing_rule_gives_no_fare():
-    rule = FareRule("jeepney", D("0"), D("4"), D("0"), D("0.2"), "PLACEHOLDER", True)
+    rule = FareRule("jeepney", D("0"), D("4"), D("0"), D("0"), D("0"), "PLACEHOLDER", True)
     best = make_planner(rule=rule).plan(at(0, 500), at(0, 1500))[0]
     assert best.total_fare is None and best.to_dict()["fare_available"] is False
     assert make_planner(rule=None).plan(at(0, 500), at(0, 1500))[0].total_fare is None

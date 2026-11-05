@@ -137,11 +137,14 @@ def test_landmark_lifecycle_and_directions(client, headers):
 def test_fare_rule_lifecycle(client, headers):
     """Values are test fixtures, not real fares."""
     body = {"vehicle_type": "jeepney", "base_fare": "10.00", "base_km": "4", "per_km_rate": "1.50",
-            "discount_rate": "0.2", "effective_date": "2001-01-01", "source": "pytest fixture"}
+            "discounted_base_fare": "8.00", "discounted_per_km_rate": "1.20",
+            "effective_date": "2001-01-01", "source": "pytest fixture"}
     rule_id = client.post("/admin/fare-rules", json=body, headers=headers).json()["id"]
     result = plan(client, pt(0.2), pt(2.8), rider_type="student")
     assert result["trips"][0]["total_fare"] == 8.0 and result["fare_source"] == "pytest fixture"
     assert client.post("/admin/fare-rules", json=body, headers=headers).status_code == 409
+    too_high = {**body, "effective_date": "2002-01-01", "discounted_base_fare": "10.50"}
+    assert client.post("/admin/fare-rules", json=too_high, headers=headers).status_code == 422
     assert client.delete(f"/admin/fare-rules/{rule_id}", headers=headers).status_code == 204
 
 

@@ -37,9 +37,9 @@ INSERT INTO routes (code, name, color, is_bidirectional, path_geojson, data_sour
    '{"type": "LineString", "coordinates": [[125.6100, 7.0700], [125.6100, 7.0800]]}', 'test fixture'),
   ('R02', 'Corner - East End', '#43A047', TRUE,
    '{"type": "LineString", "coordinates": [[125.6100, 7.0800], [125.6200, 7.0800]]}', 'test fixture');
-INSERT INTO fare_rules (vehicle_type, base_fare, base_km, per_km_rate, discount_rate,
-                        effective_date, source, is_placeholder)
-VALUES ('jeepney', 0, 4, 0, 0.2, '2000-01-01', 'test placeholder', TRUE);
+INSERT INTO fare_rules (vehicle_type, base_fare, base_km, per_km_rate, discounted_base_fare,
+                        discounted_per_km_rate, effective_date, source, is_placeholder)
+VALUES ('jeepney', 0, 4, 0, 0, 0, '2000-01-01', 'test placeholder', TRUE);
 """
 
 

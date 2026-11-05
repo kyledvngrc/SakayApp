@@ -440,28 +440,32 @@ function faresHtml() {
   const f = state.editingFare;
   const rows = state.data.fare_rules.map((r) => `
     <tr data-fare="${r.id}" style="cursor:pointer">
-      <td>${esc(r.vehicle_type)}</td><td>₱${r.base_fare.toFixed(2)} / ${r.base_km} km</td>
-      <td>+₱${r.per_km_rate.toFixed(2)}/km</td><td>${Math.round(r.discount_rate * 100)}%</td>
+      <td>${esc(r.vehicle_type)}</td><td>${r.base_km} km</td>
+      <td>₱${r.base_fare.toFixed(2)} + ₱${r.per_km_rate.toFixed(2)}/km</td>
+      <td>₱${r.discounted_base_fare.toFixed(2)} + ₱${r.discounted_per_km_rate.toFixed(2)}/km</td>
       <td>${esc(r.effective_date)}${r.is_placeholder ? ' <span class="tag">placeholder</span>' : ""}</td>
     </tr>`).join("");
   const anyReal = state.data.fare_rules.some((r) => !r.is_placeholder);
   return `
     ${anyReal ? "" : '<div class="notice">No real fare rule yet, so the app shows fares as unavailable. Add the official LTFRB fare matrix values with their citation.</div>'}
-    <table><thead><tr><th>Vehicle</th><th>Base</th><th>Per km</th><th>Disc.</th><th>Effective</th></tr></thead>
+    <table><thead><tr><th>Vehicle</th><th>Base km</th><th>Regular</th><th>Discounted</th><th>Effective</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <p class="hint">The rule with the latest effective date on or before today is used. Click a row to edit it.</p>
     <h2>${f?.id ? "Edit fare rule" : "Add fare rule"}</h2>
     <form id="fare-form">
       <label>Vehicle <select name="vehicle_type">${VEHICLES.map((v) =>
         `<option ${v === (f?.vehicle_type ?? "jeepney") ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label>Base distance (km) <input name="base_km" type="number" step="0.01" min="0" required value="${f?.base_km ?? ""}"></label>
+      <p class="hint">The base fare covers the base distance; each started kilometre after it adds the per-km amount.</p>
       <div class="row">
-        <label>Base fare (₱) <input name="base_fare" type="number" step="0.01" min="0" required value="${f?.base_fare ?? ""}"></label>
-        <label>Base distance (km) <input name="base_km" type="number" step="0.01" min="0" required value="${f?.base_km ?? ""}"></label>
+        <label>Regular base fare (₱) <input name="base_fare" type="number" step="0.01" min="0" required value="${f?.base_fare ?? ""}"></label>
+        <label>Regular per extra km (₱) <input name="per_km_rate" type="number" step="0.01" min="0" required value="${f?.per_km_rate ?? ""}"></label>
       </div>
       <div class="row">
-        <label>Each extra km (₱) <input name="per_km_rate" type="number" step="0.01" min="0" required value="${f?.per_km_rate ?? ""}"></label>
-        <label>Discount (0–1) <input name="discount_rate" type="number" step="0.001" min="0" max="0.999" required value="${f?.discount_rate ?? ""}"></label>
+        <label>Discounted base fare (₱) <input name="discounted_base_fare" type="number" step="0.01" min="0" required value="${f?.discounted_base_fare ?? ""}"></label>
+        <label>Discounted per extra km (₱) <input name="discounted_per_km_rate" type="number" step="0.01" min="0" required value="${f?.discounted_per_km_rate ?? ""}"></label>
       </div>
+      <p class="hint">Discounted: students, seniors and PWDs. Enter the amounts exactly as listed in the fare matrix.</p>
       <label>Effective date <input name="effective_date" type="date" required value="${esc(f?.effective_date ?? "")}"></label>
       <label>Source / citation <input name="source" required minlength="3" value="${esc(f?.source ?? "")}" placeholder="e.g. LTFRB Memorandum Circular No. …"></label>
       <label class="check"><input type="checkbox" name="is_placeholder" ${f?.is_placeholder ? "checked" : ""}> Placeholder (not shown to commuters)</label>
@@ -477,7 +481,8 @@ async function saveFare(e) {
   const fd = new FormData(e.target);
   const body = {
     vehicle_type: fd.get("vehicle_type"), base_fare: fd.get("base_fare"), base_km: fd.get("base_km"),
-    per_km_rate: fd.get("per_km_rate"), discount_rate: fd.get("discount_rate"),
+    per_km_rate: fd.get("per_km_rate"), discounted_base_fare: fd.get("discounted_base_fare"),
+    discounted_per_km_rate: fd.get("discounted_per_km_rate"),
     effective_date: fd.get("effective_date"), source: fd.get("source").trim(),
     is_placeholder: fd.get("is_placeholder") === "on",
   };

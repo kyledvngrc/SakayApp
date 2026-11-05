@@ -69,7 +69,8 @@ def admin_data() -> dict:
         r["length_km"] = round(geo.cumulative_m(path)[-1] / 1000, 2) if path else 0
         r["kind"] = live.kind if live else None
     fares = db.fetch_all("""SELECT id, vehicle_type::text AS vehicle_type, base_fare::float,
-                                   base_km::float, per_km_rate::float, discount_rate::float,
+                                   base_km::float, per_km_rate::float, discounted_base_fare::float,
+                                   discounted_per_km_rate::float,
                                    effective_date::text AS effective_date, source, is_placeholder
                             FROM fare_rules ORDER BY vehicle_type, effective_date DESC""")
     transfers = [{"from": l.from_route, "to": l.to_route, "walk_m": round(l.walk_m),
@@ -181,10 +182,12 @@ def delete_route(route_id: int) -> Response:
 def create_fare_rule(body: FareRuleIn) -> dict:
     with db.transaction() as cur:
         cur.execute("""INSERT INTO fare_rules (vehicle_type, base_fare, base_km, per_km_rate,
-                                               discount_rate, effective_date, source, is_placeholder)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                                               discounted_base_fare, discounted_per_km_rate,
+                                               effective_date, source, is_placeholder)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                     (body.vehicle_type, body.base_fare, body.base_km, body.per_km_rate,
-                     body.discount_rate, body.effective_date, body.source, body.is_placeholder))
+                     body.discounted_base_fare, body.discounted_per_km_rate,
+                     body.effective_date, body.source, body.is_placeholder))
         rule_id = cur.fetchone()["id"]
     _reload()
     return {"id": rule_id}
@@ -195,12 +198,13 @@ def create_fare_rule(body: FareRuleIn) -> dict:
 def update_fare_rule(rule_id: int, body: FareRuleIn) -> dict:
     with db.transaction() as cur:
         cur.execute("""UPDATE fare_rules SET vehicle_type = %s, base_fare = %s, base_km = %s,
-                              per_km_rate = %s, discount_rate = %s, effective_date = %s,
+                              per_km_rate = %s, discounted_base_fare = %s,
+                              discounted_per_km_rate = %s, effective_date = %s,
                               source = %s, is_placeholder = %s
                        WHERE id = %s RETURNING id""",
                     (body.vehicle_type, body.base_fare, body.base_km, body.per_km_rate,
-                     body.discount_rate, body.effective_date, body.source, body.is_placeholder,
-                     rule_id))
+                     body.discounted_base_fare, body.discounted_per_km_rate,
+                     body.effective_date, body.source, body.is_placeholder, rule_id))
         if cur.fetchone() is None:
             raise HTTPException(404, "Fare rule not found")
     _reload()
