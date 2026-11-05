@@ -9,31 +9,33 @@ export type SheetSize = 'peek' | 'half' | 'full';
 
 type Props = {
   size: SheetSize;
-  bottomOffset?: number; // e.g. the tab bar's height
+  /** Space below the screen that the screen doesn't own, e.g. a tab bar. The
+   *  sheet sits at the bottom of its screen, so this only shrinks the heights. */
+  reservedBelow?: number;
   onSizeChange: (size: SheetSize) => void;
   header?: ReactNode; // stays visible; dragging it moves the sheet
   children?: ReactNode; // scrolls
 };
 
-/** Visible sheet heights, measured above `bottomOffset`. */
-export function useSheetHeights(bottomOffset = 0) {
+/** Sheet heights within the screen (window minus anything below it, like a tab bar). */
+export function useSheetHeights(reservedBelow = 0) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const below = bottomOffset || insets.bottom;
-  return useMemo(
-    () => ({
-      peek: 150 + (bottomOffset ? 0 : insets.bottom),
-      half: Math.round(height * 0.48) - (bottomOffset ? below : 0),
-      full: Math.round(height - insets.top - 24 - (bottomOffset ? below : 0)),
-    }),
-    [height, insets.bottom, insets.top, bottomOffset, below],
-  );
+  return useMemo(() => {
+    const screen = height - reservedBelow;
+    const bottomInset = reservedBelow ? 0 : insets.bottom;
+    return {
+      peek: 150 + bottomInset,
+      half: Math.round(screen * 0.5),
+      full: screen - insets.top - Space.sm, // stops just below the notch / status bar
+    };
+  }, [height, reservedBelow, insets.top, insets.bottom]);
 }
 
-export function Sheet({ size, bottomOffset = 0, onSizeChange, header, children }: Props) {
+export function Sheet({ size, reservedBelow = 0, onSizeChange, header, children }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const heights = useSheetHeights(bottomOffset);
+  const heights = useSheetHeights(reservedBelow);
   const [visible] = useState(() => new Animated.Value(heights[size]));
   const [drag] = useState(() => ({ start: 0 })); // height when the current drag began
 
@@ -78,7 +80,7 @@ export function Sheet({ size, bottomOffset = 0, onSizeChange, header, children }
     <Animated.View
       style={[
         styles.sheet,
-        { height: visible, bottom: bottomOffset, backgroundColor: colors.background, borderColor: colors.border },
+        { height: visible, backgroundColor: colors.background, borderColor: colors.border },
       ]}>
       <View {...pan.panHandlers}>
         <Pressable onPress={cycle} accessibilityRole="adjustable" accessibilityLabel="Resize panel" style={styles.grab}>
@@ -88,7 +90,7 @@ export function Sheet({ size, bottomOffset = 0, onSizeChange, header, children }
       </View>
       <ScrollView
         style={styles.body}
-        contentContainerStyle={{ paddingHorizontal: Space.lg, paddingBottom: (bottomOffset ? 0 : insets.bottom) + Space.xl }}
+        contentContainerStyle={{ paddingHorizontal: Space.lg, paddingBottom: (reservedBelow ? 0 : insets.bottom) + Space.xl }}
         keyboardShouldPersistTaps="handled">
         {children}
       </ScrollView>

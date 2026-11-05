@@ -333,12 +333,12 @@ export default function PlanScreen() {
         <Pressable
           onPress={recenter}
           accessibilityLabel="Show my location"
-          style={[styles.fab, { bottom: tabBar + Math.min(heights[sheet], heights.half) + Space.md }]}>
+          style={[styles.fab, { bottom: Math.min(heights[sheet], heights.half) + Space.md }]}>
           <Icon name="location.fill" color={c.accent} fallback="◎" />
         </Pressable>
       )}
 
-      <Sheet size={sheet} bottomOffset={tabBar} onSizeChange={setSheet} header={header}>
+      <Sheet size={sheet} reservedBelow={tabBar} onSizeChange={setSheet} header={header}>
         {body}
       </Sheet>
     </View>
