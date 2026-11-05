@@ -403,8 +403,9 @@ const makeStyles = (c: Colors) =>
     hint: { fontSize: 12, color: c.textSecondary, marginTop: Space.md },
     homeHint: { marginTop: 2 }, // sits right under the From / To fields
     startButton: {
-      position: 'absolute', left: Space.lg, bottom: Space.lg, flexDirection: 'row', alignItems: 'center', gap: Space.sm,
-      backgroundColor: c.accent, borderRadius: 26, paddingHorizontal: Space.xl, paddingVertical: 14,
+      position: 'absolute', alignSelf: 'center', width: '70%', bottom: Space.lg, flexDirection: 'row',
+      alignItems: 'center', justifyContent: 'center', gap: Space.sm,
+      backgroundColor: c.accent, borderRadius: 26, paddingVertical: 14,
       shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
     },
     startText: { color: c.accentText, fontSize: 17, fontWeight: '700' },
