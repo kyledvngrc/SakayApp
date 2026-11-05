@@ -42,6 +42,11 @@ docker compose up -d
 docker compose exec db psql -U sakay -d sakay -c "SELECT * FROM v_legs;"
 ```
 
+### Prolog route finder (standalone tests)
+```bash
+swipl -g run_tests -t halt prolog/tests/test_routes.pl
+```
+
 ### Back-end
 ```bash
 cd backend
