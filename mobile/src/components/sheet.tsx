@@ -9,24 +9,31 @@ export type SheetSize = 'peek' | 'half' | 'full';
 
 type Props = {
   size: SheetSize;
+  bottomOffset?: number; // e.g. the tab bar's height
   onSizeChange: (size: SheetSize) => void;
   header?: ReactNode; // stays visible; dragging it moves the sheet
   children?: ReactNode; // scrolls
 };
 
-export function useSheetHeights() {
+/** Visible sheet heights, measured above `bottomOffset`. */
+export function useSheetHeights(bottomOffset = 0) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const below = bottomOffset || insets.bottom;
   return useMemo(
-    () => ({ peek: 150 + insets.bottom, half: Math.round(height * 0.48), full: Math.round(height - insets.top - 24) }),
-    [height, insets.bottom, insets.top],
+    () => ({
+      peek: 150 + (bottomOffset ? 0 : insets.bottom),
+      half: Math.round(height * 0.48) - (bottomOffset ? below : 0),
+      full: Math.round(height - insets.top - 24 - (bottomOffset ? below : 0)),
+    }),
+    [height, insets.bottom, insets.top, bottomOffset, below],
   );
 }
 
-export function Sheet({ size, onSizeChange, header, children }: Props) {
+export function Sheet({ size, bottomOffset = 0, onSizeChange, header, children }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const heights = useSheetHeights();
+  const heights = useSheetHeights(bottomOffset);
   const [visible] = useState(() => new Animated.Value(heights[size]));
   const [drag] = useState(() => ({ start: 0 })); // height when the current drag began
 
@@ -71,7 +78,7 @@ export function Sheet({ size, onSizeChange, header, children }: Props) {
     <Animated.View
       style={[
         styles.sheet,
-        { height: visible, backgroundColor: colors.background, borderColor: colors.border },
+        { height: visible, bottom: bottomOffset, backgroundColor: colors.background, borderColor: colors.border },
       ]}>
       <View {...pan.panHandlers}>
         <Pressable onPress={cycle} accessibilityRole="adjustable" accessibilityLabel="Resize panel" style={styles.grab}>
@@ -81,7 +88,7 @@ export function Sheet({ size, onSizeChange, header, children }: Props) {
       </View>
       <ScrollView
         style={styles.body}
-        contentContainerStyle={{ paddingHorizontal: Space.lg, paddingBottom: insets.bottom + Space.xl }}
+        contentContainerStyle={{ paddingHorizontal: Space.lg, paddingBottom: (bottomOffset ? 0 : insets.bottom) + Space.xl }}
         keyboardShouldPersistTaps="handled">
         {children}
       </ScrollView>

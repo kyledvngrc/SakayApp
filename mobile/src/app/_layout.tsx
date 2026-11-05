@@ -14,7 +14,10 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack screenOptions={{ headerShown: false }} />
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="route/[code]" options={{ title: 'Route', headerBackTitle: 'Routes' }} />
+          </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>
       </SafeAreaProvider>

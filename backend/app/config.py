@@ -38,4 +38,11 @@ class Settings:
     loop_tolerance_m: float = 100.0    # a one-way line ending this close to its start is a loop
 
 
+    # Place search (OpenStreetMap via Photon), biased to Davao City
+    photon_url: str = os.getenv("PHOTON_URL", "https://photon.komoot.io")
+    photon_timeout_s: float = 4.0
+    city_center: tuple[float, float] = (7.0731, 125.6128)
+    city_bbox: tuple[float, float, float, float] = (125.20, 6.95, 125.75, 7.60)   # W, S, E, N
+
+
 settings = Settings()

@@ -1,8 +1,8 @@
 // SF Symbols on iOS, with a text fallback elsewhere.
 import { SymbolView, type SFSymbol } from 'expo-symbols';
-import { Text } from 'react-native';
+import { Text, type ColorValue } from 'react-native';
 
-type Props = { name: SFSymbol; color: string; size?: number; fallback?: string };
+type Props = { name: SFSymbol; color: ColorValue; size?: number; fallback?: string };
 
 export function Icon({ name, color, size = 18, fallback = '•' }: Props) {
   return (

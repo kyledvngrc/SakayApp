@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import services
-from .routers import admin, network, trips
+from .routers import admin, network, places, trips
 
 ADMIN_DIR = Path(__file__).parent / "admin_static"
 
@@ -34,6 +34,7 @@ app = FastAPI(title="SakayApp API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(network.router)
 app.include_router(trips.router)
+app.include_router(places.router)
 app.include_router(admin.public)
 app.include_router(admin.router)
 app.mount("/admin-static", StaticFiles(directory=ADMIN_DIR), name="admin-static")

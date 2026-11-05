@@ -1,7 +1,7 @@
 // HTTP client for the SakayApp back-end.
 import Constants from 'expo-constants';
 
-import type { Landmark, LatLng, NearbyRoute, PlanResponse, RiderType, RouteInfo } from './types';
+import type { Landmark, LatLng, NearbyRoute, PlaceResult, PlanResponse, RiderType, RouteInfo } from './types';
 
 /**
  * EXPO_PUBLIC_API_URL wins (e.g. http://192.168.1.20:8000). Otherwise use the
@@ -36,8 +36,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   routes: () => request<RouteInfo[]>('/routes'),
+  route: (code: string) => request<RouteInfo>(`/routes/${encodeURIComponent(code)}`),
   landmarks: () => request<Landmark[]>('/landmarks'),
   nearbyRoutes: (p: LatLng) => request<NearbyRoute[]>(`/routes/nearby?lat=${p.lat}&lng=${p.lng}`),
+  searchPlaces: (q: string) =>
+    request<{ results: PlaceResult[]; search_available: boolean; attribution: string }>(
+      `/places/search?q=${encodeURIComponent(q)}`,
+    ),
+  reverse: (p: LatLng) => request<{ label: string }>(`/places/reverse?lat=${p.lat}&lng=${p.lng}`),
   plan: (origin: LatLng, destination: LatLng, riderType: RiderType) =>
     request<PlanResponse>('/trips/plan', {
       method: 'POST',

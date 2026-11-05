@@ -1,14 +1,13 @@
-// Full-screen map: all routes faintly, the chosen trip boldly, start and end pins.
+// Full-screen map. Shows only the chosen trip (no other routes), plus start and end pins.
 import { forwardRef } from 'react';
 import { StyleSheet } from 'react-native';
 import MapView, { Marker, Polyline, type LongPressEvent, type Region } from 'react-native-maps';
 
 import { useColors } from '@/constants/theme';
 import { DAVAO, toCoord } from '@/lib/geo';
-import type { Endpoint, LatLng, RouteInfo, Trip } from '@/lib/types';
+import type { Endpoint, LatLng, Trip } from '@/lib/types';
 
 type Props = {
-  routes: RouteInfo[];
   trip: Trip | null;
   origin: Endpoint | null;
   destination: Endpoint | null;
@@ -18,7 +17,7 @@ type Props = {
 };
 
 export const TripMap = forwardRef<MapView, Props>(function TripMap(
-  { routes, trip, origin, destination, bottomInset, onLongPress, onRegionChangeComplete },
+  { trip, origin, destination, bottomInset, onLongPress, onRegionChangeComplete },
   ref,
 ) {
   const c = useColors();
@@ -35,15 +34,6 @@ export const TripMap = forwardRef<MapView, Props>(function TripMap(
         onLongPress?.({ lat: e.nativeEvent.coordinate.latitude, lng: e.nativeEvent.coordinate.longitude })
       }
       onRegionChangeComplete={(r: Region) => onRegionChangeComplete?.({ lat: r.latitude, lng: r.longitude })}>
-      {routes.map((r) => (
-        <Polyline
-          key={r.code}
-          coordinates={r.path_geojson.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }))}
-          strokeColor={trip ? `${r.color}40` : `${r.color}B0`}
-          strokeWidth={trip ? 3 : 4}
-        />
-      ))}
-
       {trip?.segments.map((s, i) =>
         s.kind === 'walk' ? (
           <Polyline key={`s${i}`} coordinates={s.path.map(toCoord)} strokeColor={c.walk} strokeWidth={4} lineDashPattern={[2, 8]} />

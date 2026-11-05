@@ -14,6 +14,7 @@ For each technology: what it does in SakayApp, why it was chosen, and alternativ
 | react-native-maps | Map on iOS (Apple Maps) | — | _TODO_ | MapLibre |
 | Leaflet + OpenStreetMap | Admin route-entry map | — | _TODO_ | Google Maps |
 | GitHub | Version control, PR review | — | _TODO_ | GitLab |
+| Photon (OpenStreetMap) | Place and address search for the From / To fields, via the back-end | Imperative (HTTP), Functional (result formatting) | Free, OSM data covers Davao well, designed for search-as-you-type; proxied and cached, user location never sent | Nominatim (policy forbids autocomplete), Google Places (paid, API key), Apple MapKit search (not in Expo Go) |
 
 ## Data and limitations
 - Area covered and data collection dates: _TODO_

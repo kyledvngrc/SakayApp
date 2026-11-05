@@ -72,3 +72,6 @@ export type PlanResponse = {
 
 /** A start or end point chosen by the commuter. */
 export type Endpoint = { label: string; point: LatLng; isMyLocation?: boolean };
+
+/** A search result: one of our landmarks or an OpenStreetMap place. */
+export type PlaceResult = { name: string; detail: string; lat: number; lng: number; source: 'landmark' | 'osm' };

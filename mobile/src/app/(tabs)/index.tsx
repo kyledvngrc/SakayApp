@@ -1,8 +1,12 @@
-// Home: the map with a bottom sheet that moves through
-// home -> search -> (pick on map) -> results -> trip.
+// Plan tab: the map with a bottom sheet.
+//   home    From / To fields
+//   search  find a place for one field (addresses, places, landmarks)
+//   pick    move the map under the pin to choose a point
+//   results trip options          trip  step-by-step directions
 import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBottomTabBarHeight } from 'expo-router/js-tabs';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type MapView from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,43 +21,46 @@ import { TripMap } from '@/components/trip-map';
 import { TripSteps } from '@/components/trip-steps';
 import { Space, useColors, type Colors } from '@/constants/theme';
 import { useCurrentLocation } from '@/hooks/use-current-location';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useRiderType } from '@/hooks/use-rider-type';
 import { api } from '@/lib/api';
-import { distanceText, peso } from '@/lib/format';
-import { nearestLandmark, toCoord } from '@/lib/geo';
+import { peso } from '@/lib/format';
+import { toCoord } from '@/lib/geo';
 import type { Endpoint, LatLng } from '@/lib/types';
 
 type Mode = 'home' | 'search' | 'pick' | 'results' | 'trip';
 type Which = 'origin' | 'destination';
+const DROPPED = 'Dropped pin';
 
-export default function HomeScreen() {
+export default function PlanScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const heights = useSheetHeights();
+  const tabBar = useBottomTabBarHeight();
+  const heights = useSheetHeights(tabBar);
   const mapRef = useRef<MapView>(null);
 
   const { location, refresh: refreshLocation } = useCurrentLocation();
   const [rider, setRider] = useRiderType();
 
   const [mode, setMode] = useState<Mode>('home');
-  const [sheet, setSheet] = useState<SheetSize>('half');
+  const [sheet, setSheet] = useState<SheetSize>('peek');
   const [editing, setEditing] = useState<Which>('destination');
   const [query, setQuery] = useState('');
-  const [origin, setOrigin] = useState<Endpoint | null>(null);
+  const [origin, setOrigin] = useState<Endpoint | null>(null); // null = My location
   const [destination, setDestination] = useState<Endpoint | null>(null);
   const [selected, setSelected] = useState(0);
-  const mapCenter = useRef<LatLng | null>(null);
+  const center = useRef<LatLng | null>(null); // map centre, for pick mode
 
   const myLocation: Endpoint | null =
     location.status === 'ok' ? { label: 'My location', point: location.point, isMyLocation: true } : null;
   const start = origin ?? myLocation;
 
-  const routes = useQuery({ queryKey: ['routes'], queryFn: api.routes });
-  const landmarks = useQuery({ queryKey: ['landmarks'], queryFn: api.landmarks });
-  const nearby = useQuery({
-    queryKey: ['nearby', myLocation && Math.round(myLocation.point.lat * 2000), myLocation && Math.round(myLocation.point.lng * 2000)],
-    queryFn: () => api.nearbyRoutes(myLocation!.point),
-    enabled: !!myLocation && mode === 'home',
+  const searchText = useDebouncedValue(query.trim(), 350);
+  const places = useQuery({
+    queryKey: ['places', searchText.toLowerCase()],
+    queryFn: () => api.searchPlaces(searchText),
+    enabled: mode === 'search' && searchText.length >= 2,
+    staleTime: 10 * 60_000,
   });
   const plan = useQuery({
     queryKey: ['plan', start?.point, destination?.point, rider],
@@ -62,7 +69,7 @@ export default function HomeScreen() {
   });
 
   const trips = plan.data?.trips ?? [];
-  const trip = mode === 'results' || mode === 'trip' ? trips[selected] ?? null : null;
+  const trip = mode === 'results' || mode === 'trip' ? (trips[selected] ?? null) : null;
 
   // Frame the chosen trip above the sheet.
   useEffect(() => {
@@ -75,23 +82,29 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip, mode]);
 
-  const describe = (p: LatLng): string => {
-    const lm = nearestLandmark(p, landmarks.data ?? []);
-    return lm ? `Near ${lm.name}` : 'Dropped pin';
+  /** Replace "Dropped pin" with a nearby place name once the server knows it. */
+  const relabel = (which: Which, p: LatLng) => {
+    api.reverse(p).then(({ label }) => {
+      const update = (e: Endpoint | null) => (e && e.point === p ? { ...e, label } : e);
+      if (which === 'origin') setOrigin(update);
+      else setDestination(update);
+    }).catch(() => {});
   };
 
   const setEndpoint = (which: Which, e: Endpoint | null) => {
     if (which === 'origin') setOrigin(e?.isMyLocation ? null : e);
     else setDestination(e);
-    const nextStart = which === 'origin' ? e ?? myLocation : start;
+    if (e && e.label === DROPPED) relabel(which, e.point);
+    const nextStart = which === 'origin' ? (e ?? myLocation) : start;
     const nextDest = which === 'destination' ? e : destination;
     setSelected(0);
+    setQuery('');
     if (nextStart && nextDest) {
       setMode('results');
       setSheet('half');
     } else {
-      setEditing(nextStart ? 'destination' : 'origin');
-      setMode('search');
+      setMode('home');
+      setSheet('peek');
     }
   };
 
@@ -108,15 +121,20 @@ export default function HomeScreen() {
   };
 
   const confirmPick = () => {
-    const p = mapCenter.current;
+    const p = center.current;
     if (!p) return;
     Haptics.selectionAsync().catch(() => {});
-    setEndpoint(editing, { label: describe(p), point: p });
+    setEndpoint(editing, { label: DROPPED, point: p });
   };
 
-  const goHome = () => {
+  const backFromSearch = () => {
+    setMode(start && destination ? 'results' : 'home');
+    setSheet(start && destination ? 'half' : 'peek');
+  };
+
+  const reset = () => {
     setMode('home');
-    setSheet('half');
+    setSheet('peek');
     setDestination(null);
     setOrigin(null);
   };
@@ -124,7 +142,7 @@ export default function HomeScreen() {
   const swap = () => {
     if (!destination) return;
     const oldStart = start;
-    setOrigin(destination);
+    setOrigin(destination.isMyLocation ? null : destination);
     setDestination(oldStart);
     setSelected(0);
   };
@@ -132,7 +150,7 @@ export default function HomeScreen() {
   const onLongPress = (p: LatLng) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const which: Which = mode === 'search' || mode === 'pick' ? editing : 'destination';
-    setEndpoint(which, { label: describe(p), point: p });
+    setEndpoint(which, { label: DROPPED, point: p });
   };
 
   const recenter = () => {
@@ -143,43 +161,31 @@ export default function HomeScreen() {
     }
   };
 
-  const filteredLandmarks = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (landmarks.data ?? [])
-      .filter((l) => !q || l.name.toLowerCase().includes(q) || (l.description ?? '').toLowerCase().includes(q))
-      .slice(0, 30);
-  }, [landmarks.data, query]);
-
   const styles = makeStyles(c);
+  const fields = <EndpointFields origin={start} destination={destination} onEdit={openSearch} onSwap={swap} />;
 
-  // ------------------------------------------------------------------ panels
+  // ------------------------------------------------------------------ header
   const header = (() => {
     if (mode === 'home') {
-      return (
-        <View style={styles.headerPad}>
-          <Pressable onPress={() => openSearch('destination')} style={styles.whereTo} accessibilityRole="search">
-            <Icon name="magnifyingglass" color={c.textSecondary} fallback="⌕" />
-            <Text style={styles.whereToText}>Where to?</Text>
-          </Pressable>
-        </View>
-      );
+      return <View style={styles.headerPad}>{fields}</View>;
     }
     if (mode === 'search') {
       return (
         <View style={styles.headerPad}>
           <View style={styles.searchRow}>
-            <Pressable onPress={() => (destination || origin ? setMode('results') : goHome())} hitSlop={10} accessibilityLabel="Back">
+            <Pressable onPress={backFromSearch} hitSlop={10} accessibilityLabel="Back">
               <Icon name="chevron.left" color={c.text} size={20} fallback="‹" />
             </Pressable>
             <TextInput
               autoFocus
               value={query}
               onChangeText={setQuery}
-              placeholder={editing === 'origin' ? 'Search a start point' : 'Search a destination'}
+              placeholder={editing === 'origin' ? 'Search a start: place, street or address' : 'Search a place, street or address'}
               placeholderTextColor={c.textSecondary}
               style={styles.input}
               returnKeyType="search"
               clearButtonMode="while-editing"
+              autoCorrect={false}
             />
           </View>
         </View>
@@ -190,7 +196,7 @@ export default function HomeScreen() {
         <View style={styles.headerPad}>
           <Text style={styles.title}>Move the map to your {editing === 'origin' ? 'start point' : 'destination'}</Text>
           <View style={styles.buttonRow}>
-            <Pressable onPress={() => setMode('search')} style={[styles.button, styles.secondary]}>
+            <Pressable onPress={() => { setMode('search'); setSheet('full'); }} style={[styles.button, styles.secondary]}>
               <Text style={styles.secondaryText}>Cancel</Text>
             </Pressable>
             <Pressable onPress={confirmPick} style={[styles.button, styles.primary]}>
@@ -204,18 +210,15 @@ export default function HomeScreen() {
       return (
         <View style={styles.headerPad}>
           <View style={styles.searchRow}>
-            <Pressable onPress={goHome} hitSlop={10} accessibilityLabel="Close trip planner">
+            <Pressable onPress={reset} hitSlop={10} accessibilityLabel="Clear trip">
               <Icon name="xmark" color={c.text} size={18} fallback="✕" />
             </Pressable>
-            <View style={{ flex: 1 }}>
-              <EndpointFields origin={start} destination={destination} onEdit={openSearch} onSwap={swap} />
-            </View>
+            <View style={{ flex: 1 }}>{fields}</View>
           </View>
           <RiderPicker value={rider} onChange={setRider} />
         </View>
       );
     }
-    // trip
     return (
       <View style={styles.headerPad}>
         <View style={styles.searchRow}>
@@ -233,54 +236,49 @@ export default function HomeScreen() {
     );
   })();
 
+  // ------------------------------------------------------------------ body
   const body = (() => {
     if (mode === 'home') {
       return (
         <View>
           {location.status === 'denied' && (
-            <Text style={styles.notice}>Location is off. Allow location for SakayApp in Settings, or choose a start point when planning.</Text>
+            <Text style={styles.notice}>Location is off, so set a start point. To use your location, allow it for SakayApp in Settings.</Text>
           )}
-          <Text style={styles.section}>Routes near you</Text>
-          {location.status === 'loading' && <ActivityIndicator style={{ marginTop: Space.md }} />}
-          {nearby.data?.length === 0 && <Text style={styles.muted}>No jeepney route passes within 500 m of you.</Text>}
-          {nearby.error && <Text style={styles.notice}>{(nearby.error as Error).message}</Text>}
-          {nearby.data?.map((r) => (
-            <View key={r.code} style={styles.listRow}>
-              <RouteBadge code={r.code} color={r.color} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle} numberOfLines={1}>{r.name}</Text>
-                <Text style={styles.muted}>
-                  {distanceText(r.walk_m)} away · {r.kind === 'both' ? 'both ways' : r.kind === 'loop' ? 'loop' : 'one way'}
-                </Text>
-              </View>
-            </View>
-          ))}
-          <Text style={styles.hint}>Tip: press and hold anywhere on the map to go there.</Text>
+          <Text style={styles.hint}>Tap a field to search a place, street or address. You can also press and hold on the map.</Text>
         </View>
       );
     }
     if (mode === 'search') {
+      const results = places.data?.results ?? [];
+      const searching = searchText.length >= 2;
       return (
         <View>
           {editing === 'origin' && myLocation && (
             <Option styles={styles} icon="location.fill" color={c.accent} label="My location" onPress={() => setEndpoint('origin', myLocation)} />
           )}
           <Option styles={styles} icon="map" color={c.accent} label="Choose on the map" onPress={startPicking} />
-          {filteredLandmarks.length > 0 && <Text style={styles.section}>Places</Text>}
-          {filteredLandmarks.map((l) => (
+          {searching && places.isFetching && results.length === 0 && <ActivityIndicator style={{ marginTop: Space.md }} />}
+          {results.length > 0 && <Text style={styles.section}>Results</Text>}
+          {results.map((r, i) => (
             <Option
-              key={l.id}
+              key={`${r.name}-${i}`}
               styles={styles}
-              icon="mappin"
-              color={c.textSecondary}
-              label={l.name}
-              sub={l.description ?? undefined}
-              onPress={() => setEndpoint(editing, { label: l.name, point: { lat: l.lat, lng: l.lng } })}
+              icon={r.source === 'landmark' ? 'star.fill' : 'mappin'}
+              color={r.source === 'landmark' ? '#F2A900' : c.textSecondary}
+              label={r.name}
+              sub={r.detail || undefined}
+              onPress={() => setEndpoint(editing, { label: r.name, point: { lat: r.lat, lng: r.lng } })}
             />
           ))}
-          {query.trim() !== '' && filteredLandmarks.length === 0 && (
-            <Text style={styles.muted}>No saved place matches “{query.trim()}”. Choose it on the map instead.</Text>
+          {searching && places.data && results.length === 0 && (
+            <Text style={styles.muted}>
+              {places.data.search_available
+                ? `Nothing found for “${searchText}” in Davao City. Try another spelling, or choose it on the map.`
+                : 'Address search is unavailable right now. Choose the place on the map instead.'}
+            </Text>
           )}
+          {places.error && <Text style={styles.notice}>{(places.error as Error).message}</Text>}
+          {results.length > 0 && <Text style={styles.hint}>{places.data?.attribution}</Text>}
         </View>
       );
     }
@@ -295,11 +293,7 @@ export default function HomeScreen() {
               key={i}
               trip={t}
               selected={i === selected}
-              onPress={() => {
-                if (i === selected) {
-                  setMode('trip');
-                } else setSelected(i);
-              }}
+              onPress={() => (i === selected ? setMode('trip') : setSelected(i))}
             />
           ))}
           {trips.length > 0 && (
@@ -319,37 +313,32 @@ export default function HomeScreen() {
     <View style={styles.screen}>
       <TripMap
         ref={mapRef}
-        routes={routes.data ?? []}
         trip={trip}
-        origin={mode === 'results' || mode === 'trip' ? start : null}
-        destination={mode === 'home' ? null : destination}
+        origin={mode === 'pick' ? null : start}
+        destination={mode === 'pick' ? null : destination}
         bottomInset={heights[sheet]}
         onLongPress={onLongPress}
         onRegionChangeComplete={(p) => {
-          mapCenter.current = p;
+          center.current = p;
         }}
       />
 
       {mode === 'pick' && (
-        <View pointerEvents="none" style={[styles.crosshair, { bottom: heights[sheet] / 2 }]}>
+        <View pointerEvents="none" style={[styles.crosshair, { bottom: heights[sheet] }]}>
           <Icon name="mappin" color={editing === 'origin' ? c.start : c.end} size={36} fallback="📍" />
         </View>
       )}
 
-      <Pressable
-        onPress={recenter}
-        accessibilityLabel="Show my location"
-        style={[styles.fab, { bottom: Math.min(heights[sheet], heights.half) + Space.md }]}>
-        <Icon name="location.fill" color={c.accent} fallback="◎" />
-      </Pressable>
-
-      {routes.error && (
-        <View style={[styles.banner, { top: insets.top + Space.sm }]}>
-          <Text style={styles.bannerText}>{(routes.error as Error).message}</Text>
-        </View>
+      {mode !== 'search' && (
+        <Pressable
+          onPress={recenter}
+          accessibilityLabel="Show my location"
+          style={[styles.fab, { bottom: tabBar + Math.min(heights[sheet], heights.half) + Space.md }]}>
+          <Icon name="location.fill" color={c.accent} fallback="◎" />
+        </Pressable>
       )}
 
-      <Sheet size={sheet} onSizeChange={setSheet} header={header}>
+      <Sheet size={sheet} bottomOffset={tabBar} onSizeChange={setSheet} header={header}>
         {body}
       </Sheet>
     </View>
@@ -372,8 +361,8 @@ function Option({ styles, icon, color, label, sub, onPress }: OptionProps) {
         <Icon name={icon} color={color} fallback="•" />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle}>{label}</Text>
-        {sub ? <Text style={styles.muted}>{sub}</Text> : null}
+        <Text style={styles.rowTitle} numberOfLines={1}>{label}</Text>
+        {sub ? <Text style={styles.muted} numberOfLines={1}>{sub}</Text> : null}
       </View>
     </Pressable>
   );
@@ -383,8 +372,6 @@ const makeStyles = (c: Colors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
     headerPad: { paddingHorizontal: Space.lg, paddingBottom: Space.sm },
-    whereTo: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, backgroundColor: c.surface, borderRadius: 12, padding: Space.md },
-    whereToText: { fontSize: 17, color: c.textSecondary },
     searchRow: { flexDirection: 'row', alignItems: 'center', gap: Space.md },
     input: { flex: 1, fontSize: 17, color: c.text, backgroundColor: c.surface, borderRadius: 10, paddingHorizontal: Space.md, paddingVertical: 10 },
     title: { fontSize: 16, fontWeight: '600', color: c.text, marginBottom: Space.sm },
@@ -403,11 +390,9 @@ const makeStyles = (c: Colors) =>
     muted: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     hint: { fontSize: 12, color: c.textSecondary, marginTop: Space.md },
     notice: { backgroundColor: c.warnBg, color: c.warnText, borderRadius: 8, padding: Space.md, marginVertical: Space.sm, overflow: 'hidden' },
-    crosshair: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
+    crosshair: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', paddingBottom: 36 },
     fab: {
       position: 'absolute', right: Space.lg, width: 44, height: 44, borderRadius: 22, backgroundColor: c.background,
       alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
     },
-    banner: { position: 'absolute', left: Space.lg, right: Space.lg, backgroundColor: c.warnBg, borderRadius: 10, padding: Space.md },
-    bannerText: { color: c.warnText },
   });
