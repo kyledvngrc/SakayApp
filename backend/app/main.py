@@ -48,4 +48,5 @@ def admin_page() -> FileResponse:
 @app.get("/health", tags=["meta"])
 def health() -> dict:
     net = services.planner().network
-    return {"status": "ok", "stops": len(net.stops), "routes": len(net.routes)}
+    return {"status": "ok", "routes": len(net.routes), "landmarks": len(net.landmarks),
+            "transfer_points": len(net.links)}

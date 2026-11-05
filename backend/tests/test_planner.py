@@ -1,4 +1,4 @@
-"""TripPlanner and ranking, with real Prolog but no database."""
+"""TripPlanner with real Prolog but no database (TEST DATA ONLY)."""
 from decimal import Decimal as D
 
 import pytest
@@ -6,107 +6,119 @@ import pytest
 from app import prolog_bridge
 from app.config import Settings, settings
 from app.fare_calc import FareRule
-from app.geo import LatLng
-from app.models import Network, Route, Stop, TripPlanner
+from app.models import Landmark, Network, Route, TripPlanner
 
-# Small test network on a straight north-south line (~110 m per 0.001 deg).
-#   R1: 1-2-3-4     R2: 4-5-6     R3 (express): 1-4
-# Stop 4 (the transfer stop) and 6 are landmarks; the others are generic.
-STOPS = {i: Stop(i, f"S{i}", 7.000 + 0.004 * (i - 1), 125.6, is_landmark=i in (4, 6))
-         for i in range(1, 7)}
-ROUTES = {
-    "R1": Route("R1", "Route 1", "#E53935", "jeepney", True, (1, 2, 3, 4)),
-    "R2": Route("R2", "Route 2", "#43A047", "jeepney", True, (4, 5, 6)),
-    "R3": Route("R3", "Express", "#1E88E5", "jeepney", True, (1, 4)),
-}
+from .lines import at, line
+
+S = Settings(walk_radius_m=300)
 RULE = FareRule("jeepney", D("10.00"), D("4"), D("1.50"), D("0.20"), "test fixture", False)
 
 
-def legs_for(routes):
-    out = {}
-    for r in routes.values():
-        for a, b in zip(r.stop_ids, r.stop_ids[1:]):
-            km = D("0.44") * abs(b - a)
-            out[(r.code, a, b)] = km
-            out[(r.code, b, a)] = km
-    return out
+def route(code, name, path, both=True):
+    return Route.from_line(code, name, "#123456", "jeepney", both, path, S.loop_tolerance_m)
 
 
-def make_planner(rule=RULE, routes=ROUTES):
-    net = Network(STOPS, routes, legs_for(routes), {"jeepney": rule} if rule else {})
+#   NS: Plaza - Market, 3 km north.   EW: West - East, crosses NS at 2 km north.
+#   PAR: parallel to EW 150 m further north (walk transfer from NS only near its end).
+#   ONE: one way, east from (0, -1000) to (2000, -1000).
+#   LOOP: one-way loop around a 1 km square south-west of the base.
+ROUTES = {r.code: r for r in [
+    route("NS", "Plaza - Market", line((0, 0), (0, 3000))),
+    route("EW", "West - East", line((-2000, 2000), (2000, 2000))),
+    route("ONE", "One Way", line((0, -1000), (2000, -1000)), both=False),
+    route("LOOP", "Loop", line((-3000, 0), (-2000, 0), (-2000, -1000), (-3000, -1000), (-3000, 0)),
+          both=False),
+]}
+LANDMARKS = (Landmark(1, "City Hall", *at(0, 2010)), Landmark(2, "East Gate", *at(1500, 2050)))
+
+
+def make_planner(rule=RULE, routes=ROUTES, extra=()):
+    routes = {**routes, **{r.code: r for r in extra}}
+    net = Network.build(routes, LANDMARKS, {"jeepney": rule} if rule else {}, S)
     prolog_bridge.start(settings.prolog_rules_path)
-    prolog_bridge.load_legs(net.legs)
-    return TripPlanner(net, prolog_bridge.find_trips, Settings(walk_radius_m=300))
+    prolog_bridge.load_network(net.routes.values(), net.links)
+    return TripPlanner(net, prolog_bridge.best_trips, S)
 
 
-def at(stop_id, north_m=0.0):
-    s = STOPS[stop_id]
-    return LatLng(s.lat + north_m / 111_195, s.lng)
+def test_direct_ride_along_the_line():
+    best = make_planner().plan(at(30, 100), at(-20, 1500))[0]
+    assert best.route_codes == ("NS",) and best.transfers == 0
+    assert float(best.ride_km) == pytest.approx(1.4, abs=0.03)
+    assert [s.kind for s in best.segments] == ["walk", "ride", "walk"]
+    assert best.segments[0].distance_m == pytest.approx(30, abs=2)
 
 
-def test_direct_trip_preferred_and_deduped():
-    trips = make_planner().plan(at(1), at(4))
-    codes = [t.route_codes for t in trips]
-    assert codes[0] in {("R1",), ("R3",)} and trips[0].transfers == 0
-    assert len(codes) == len(set(codes)), "one trip per route sequence"
+def test_transfer_where_lines_cross():
+    best = make_planner().plan(at(0, 500), at(1500, 2100))[0]
+    assert best.route_codes == ("NS", "EW")
+    assert [s.kind for s in best.segments] == ["walk", "ride", "ride", "walk"]   # no walk between
+    ns, ew = best.rides
+    assert ns.alight_m == pytest.approx(2000, abs=20) and ew.board_m == pytest.approx(2000, abs=20)
 
 
-def test_transfer_trip_segments():
-    trips = make_planner().plan(at(1), at(6))
-    best = trips[0]
-    assert best.transfers == 1 and best.route_codes[-1] == "R2"
-    kinds = [s.kind for s in best.segments]
-    assert kinds == ["walk", "ride", "ride", "walk"]
-    assert best.total_fare == D("20.00")             # two boardings, each under base km
+def test_transfer_with_short_walk_between_routes():
+    side = route("SIDE", "Side", line((150, 2600), (150, 5000)))          # 150 m east of NS, past EW
+    best = make_planner(extra=(side,)).plan(at(0, 500), at(150, 4500))[0]
+    assert best.route_codes == ("NS", "SIDE")
+    walk = best.segments[2]
+    assert walk.kind == "walk" and walk.distance_m == pytest.approx(150, abs=2)
 
 
-def test_discount_applied_per_ride():
-    best = make_planner().plan(at(1), at(6), rider_type="student")[0]
-    assert best.total_fare == D("16.00")
+def test_one_way_route_only_forward():
+    planner = make_planner()
+    assert planner.plan(at(300, -1000), at(1700, -1000))[0].route_codes == ("ONE",)
+    assert planner.plan(at(1700, -1000), at(300, -1000)) == ()
 
 
-def test_placeholder_rule_gives_no_fare():
+def test_loop_wraps_around():
+    # The loop starts at (-3000, 0); ride from its last side to its first side.
+    best = make_planner().plan(at(-3000, -500), at(-2500, 0))[0]
+    assert best.route_codes == ("LOOP",)
+    assert float(best.ride_km) == pytest.approx(1.0, abs=0.05)               # 500 m + 500 m
+
+
+def test_fares_per_ride_and_discount():
+    planner = make_planner()
+    assert planner.plan(at(0, 500), at(1500, 2100))[0].total_fare == D("20.00")
+    assert planner.plan(at(0, 500), at(1500, 2100), "student")[0].total_fare == D("16.00")
+
+
+def test_placeholder_or_missing_rule_gives_no_fare():
     rule = FareRule("jeepney", D("0"), D("4"), D("0"), D("0.2"), "PLACEHOLDER", True)
-    best = make_planner(rule=rule).plan(at(1), at(6))[0]
+    best = make_planner(rule=rule).plan(at(0, 500), at(0, 1500))[0]
     assert best.total_fare is None and best.to_dict()["fare_available"] is False
+    assert make_planner(rule=None).plan(at(0, 500), at(0, 1500))[0].total_fare is None
 
 
-def test_missing_rule_gives_no_fare():
-    assert make_planner(rule=None).plan(at(1), at(6))[0].total_fare is None
-
-
-def test_too_far_from_any_stop():
-    assert make_planner().plan(at(1, north_m=-5000), at(6)) == ()
+def test_too_far_from_any_route():
+    assert make_planner().plan(at(5000, 500), at(0, 1500)) == ()
 
 
 def test_max_transfers_zero():
-    assert make_planner().plan(at(1), at(6), max_transfers=0) == ()
+    assert make_planner().plan(at(0, 500), at(1500, 2100), max_transfers=0) == ()
 
 
-def test_walk_segments_measure_distance():
-    best = make_planner().plan(at(1, north_m=-100), at(6))[0]
-    assert best.segments[0].distance_m == pytest.approx(100, abs=2)
+def test_ride_path_follows_the_line():
+    ride = make_planner().plan(at(0, 500), at(1500, 2100))[0].rides[1]
+    path = ride.path
+    assert len(path) >= 2 and path[-1] == ride.alight_point
 
 
-def test_instructions_use_landmarks_not_stop_counts():
-    best = make_planner().plan(at(1), at(6))[0].to_dict()
-    texts = [seg["instruction"] for seg in best["segments"]]
-    # Stop 1 is generic, stop 4 (S4) is 445 m away: beyond the 300 m landmark radius.
-    assert texts[0].startswith("Walk 10 m to the ") and texts[0].endswith(" route")
-    assert texts[1].endswith("and get off at S4, about 1.3 km")
-    assert texts[2].startswith("Transfer to R2 (Route 2) and get off at S6")
-    assert texts[3] == "Walk 10 m to your destination"
-    assert all("stops" not in t for t in texts)
-    assert "num_stops" not in best["segments"][1]
+def test_instructions_use_landmarks_and_heading():
+    trip = make_planner().plan(at(0, 500), at(1500, 2100))[0].to_dict()
+    texts = [seg["instruction"] for seg in trip["segments"]]
+    assert texts[0] == "Walk 10 m to the NS route"
+    assert texts[1] == "Ride NS (Plaza - Market) toward Market and get off at City Hall, about 1.5 km"
+    assert texts[2] == "Transfer to EW (West - East) toward East and get off near East Gate, about 1.5 km"
+    assert texts[3].startswith("Walk ") and texts[3].endswith(" to your destination")
+    assert "minutes" not in trip
 
 
-def test_generic_stop_described_near_landmark():
-    # Get off at stop 5 (generic), 445 m from S4 and S6 -> no landmark; move closer:
-    stops = {**STOPS, 5: Stop(5, "S5", STOPS[6].lat - 0.002, 125.6)}   # ~220 m from S6
-    net = make_planner().network
-    from app.models import Network
-    planner = TripPlanner(Network(stops, net.routes, net.leg_km, net.fare_rules),
-                          prolog_bridge.find_trips, Settings(walk_radius_m=100))
-    ride = next(s for s in planner.plan(at(4), LatLng(stops[5].lat, 125.6))[0].segments
-                if s.kind == "ride")
-    assert ride.alight_place.kind == "near" and ride.alight_place.name == "S6"
+def test_heading_backwards():
+    trip = make_planner().plan(at(0, 2500), at(0, 600))[0]
+    assert trip.rides[0].heading == "Plaza"
+
+
+def test_nearby_routes():
+    found = make_planner().nearby_routes(at(100, 2000))
+    assert [r.code for r, _ in found][:2] == ["EW", "NS"]

@@ -1,4 +1,4 @@
-"""Admin endpoints: manage stops, routes and fare rules.   (IMPERATIVE PARADIGM)
+"""Admin endpoints: manage routes, landmarks and fare rules. (IMPERATIVE PARADIGM)
 
 Every write runs in one transaction, then reloads the network so Prolog
 immediately reflects the change. All endpoints need an admin token.
@@ -13,8 +13,7 @@ import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from .. import auth, db, geo, services
-from ..geo import LatLng
-from ..schemas import FareRuleIn, LoginIn, RouteIn, StopIn, StopPatch
+from ..schemas import FareRuleIn, LandmarkIn, LandmarkPatch, LoginIn, RouteIn
 
 public = APIRouter(prefix="/auth", tags=["auth"])
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(auth.require_admin)])
@@ -42,31 +41,9 @@ def _db_errors(fn):
             return fn(*args, **kwargs)
         except psycopg2.errors.UniqueViolation as e:
             raise HTTPException(409, f"Already exists: {e.diag.message_detail or e.diag.message_primary}")
-        except psycopg2.errors.ForeignKeyViolation:
-            raise HTTPException(409, "Still in use by a route; remove it from the route first")
         except psycopg2.errors.CheckViolation as e:
             raise HTTPException(422, f"Invalid value: {e.diag.constraint_name}")
     return wrapper
-
-
-def _route_path(cur, route_id: int) -> tuple[LatLng, ...] | None:
-    cur.execute("SELECT path_geojson FROM routes WHERE id = %s", (route_id,))
-    row = cur.fetchone()
-    return geo.geojson_path(row["path_geojson"]) if row else None
-
-
-def _recompute_distances(cur, route_id: int) -> None:
-    """Refresh distance_from_prev_km for a route from its path and stop positions."""
-    cur.execute("""SELECT rs.sequence_no, s.lat, s.lng FROM route_stops rs
-                   JOIN stops s ON s.id = rs.stop_id
-                   WHERE rs.route_id = %s ORDER BY rs.sequence_no""", (route_id,))
-    rows = cur.fetchall()
-    distances = geo.stop_distances_km(_route_path(cur, route_id),
-                                      [LatLng(r["lat"], r["lng"]) for r in rows])
-    for row, km in zip(rows, distances):
-        cur.execute("""UPDATE route_stops SET distance_from_prev_km = %s
-                       WHERE route_id = %s AND sequence_no = %s""",
-                    (km, route_id, row["sequence_no"]))
 
 
 def _reload() -> dict:
@@ -78,23 +55,28 @@ def _reload() -> dict:
 @router.get("/data")
 def admin_data() -> dict:
     """Everything the admin page needs, including inactive routes."""
-    stops = db.fetch_all("""SELECT id, name, landmark, is_landmark, lat, lng, data_source,
-                                   collected_on::text AS collected_on
-                            FROM stops ORDER BY id""")
+    landmarks = db.fetch_all("""SELECT id, name, description, lat, lng, data_source,
+                                       collected_on::text AS collected_on
+                                FROM landmarks ORDER BY name""")
     routes = db.fetch_all("""SELECT id, code, name, color, vehicle_type::text AS vehicle_type,
                                     is_bidirectional, is_active, path_geojson, data_source,
                                     collected_on::text AS collected_on
                              FROM routes ORDER BY code""")
-    links = db.fetch_all("""SELECT route_id, stop_id, distance_from_prev_km::float AS km
-                            FROM route_stops ORDER BY route_id, sequence_no""")
+    network = services.planner().network
     for r in routes:
-        r["stops"] = [{"id": l["stop_id"], "km": l["km"]} for l in links if l["route_id"] == r["id"]]
-        r["total_km"] = round(sum(s["km"] for s in r["stops"]), 3)
+        live = network.routes.get(r["code"])
+        path = geo.geojson_path(r["path_geojson"]) or ()
+        r["length_km"] = round(geo.cumulative_m(path)[-1] / 1000, 2) if path else 0
+        r["kind"] = live.kind if live else None
     fares = db.fetch_all("""SELECT id, vehicle_type::text AS vehicle_type, base_fare::float,
                                    base_km::float, per_km_rate::float, discount_rate::float,
                                    effective_date::text AS effective_date, source, is_placeholder
                             FROM fare_rules ORDER BY vehicle_type, effective_date DESC""")
-    return {"stops": stops, "routes": routes, "fare_rules": fares}
+    transfers = [{"from": l.from_route, "to": l.to_route, "walk_m": round(l.walk_m),
+                  "lat": l.from_point.lat, "lng": l.from_point.lng}
+                 for l in network.links]
+    return {"landmarks": landmarks, "routes": routes, "fare_rules": fares,
+            "transfer_points": transfers}
 
 
 @router.post("/reload")
@@ -102,49 +84,44 @@ def reload_network() -> dict:
     return _reload()
 
 
-# --- Stops --------------------------------------------------------------------
+# --- Landmarks ----------------------------------------------------------------
 
-@router.post("/stops", status_code=201)
+@router.post("/landmarks", status_code=201)
 @_db_errors
-def create_stop(body: StopIn) -> dict:
+def create_landmark(body: LandmarkIn) -> dict:
     with db.transaction() as cur:
-        cur.execute("""INSERT INTO stops (name, landmark, is_landmark, lat, lng, data_source,
-                                          collected_on)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                    (body.name, body.landmark, body.is_landmark, body.lat, body.lng,
-                     body.data_source, body.collected_on))
-        stop_id = cur.fetchone()["id"]
+        cur.execute("""INSERT INTO landmarks (name, description, lat, lng, data_source, collected_on)
+                       VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (body.name, body.description, body.lat, body.lng, body.data_source,
+                     body.collected_on))
+        landmark_id = cur.fetchone()["id"]
     _reload()
-    return {"id": stop_id}
+    return {"id": landmark_id}
 
 
-@router.patch("/stops/{stop_id}")
+@router.patch("/landmarks/{landmark_id}")
 @_db_errors
-def update_stop(stop_id: int, body: StopPatch) -> dict:
+def update_landmark(landmark_id: int, body: LandmarkPatch) -> dict:
     changes = body.model_dump(exclude_unset=True)
     if not changes:
-        return {"id": stop_id}
+        return {"id": landmark_id}
     columns = ", ".join(f"{name} = %s" for name in changes)      # names come from the schema
     with db.transaction() as cur:
-        cur.execute(f"UPDATE stops SET {columns} WHERE id = %s RETURNING id",
-                    (*changes.values(), stop_id))
+        cur.execute(f"UPDATE landmarks SET {columns} WHERE id = %s RETURNING id",
+                    (*changes.values(), landmark_id))
         if cur.fetchone() is None:
-            raise HTTPException(404, "Stop not found")
-        if "lat" in changes or "lng" in changes:                  # moved: distances change
-            cur.execute("SELECT DISTINCT route_id FROM route_stops WHERE stop_id = %s", (stop_id,))
-            for row in cur.fetchall():
-                _recompute_distances(cur, row["route_id"])
+            raise HTTPException(404, "Landmark not found")
     _reload()
-    return {"id": stop_id}
+    return {"id": landmark_id}
 
 
-@router.delete("/stops/{stop_id}", status_code=204)
+@router.delete("/landmarks/{landmark_id}", status_code=204)
 @_db_errors
-def delete_stop(stop_id: int) -> Response:
+def delete_landmark(landmark_id: int) -> Response:
     with db.transaction() as cur:
-        cur.execute("DELETE FROM stops WHERE id = %s RETURNING id", (stop_id,))
+        cur.execute("DELETE FROM landmarks WHERE id = %s RETURNING id", (landmark_id,))
         if cur.fetchone() is None:
-            raise HTTPException(404, "Stop not found")
+            raise HTTPException(404, "Landmark not found")
     _reload()
     return Response(status_code=204)
 
@@ -152,11 +129,9 @@ def delete_stop(stop_id: int) -> Response:
 # --- Routes -------------------------------------------------------------------
 
 def _save_route(cur, route_id: int | None, body: RouteIn) -> int:
-    path = ({"type": "LineString", "coordinates": [[p.lng, p.lat] for p in body.path]}
-            if len(body.path) >= 2 else None)
+    path = {"type": "LineString", "coordinates": [[p.lng, p.lat] for p in body.path]}
     values = (body.code, body.name, body.color, body.vehicle_type, body.is_bidirectional,
-              body.is_active, json.dumps(path) if path else None, body.data_source,
-              body.collected_on)
+              body.is_active, json.dumps(path), body.data_source, body.collected_on)
     if route_id is None:
         cur.execute("""INSERT INTO routes (code, name, color, vehicle_type, is_bidirectional,
                                            is_active, path_geojson, data_source, collected_on)
@@ -169,31 +144,7 @@ def _save_route(cur, route_id: int | None, body: RouteIn) -> int:
     row = cur.fetchone()
     if row is None:
         raise HTTPException(404, "Route not found")
-    route_id = row["id"]
-
-    # Resolve each stop: reuse an existing id or create the new stop.
-    stop_ids: list[int] = []
-    for ref in body.stops:
-        if ref.id is not None:
-            cur.execute("SELECT id FROM stops WHERE id = %s", (ref.id,))
-            if cur.fetchone() is None:
-                raise HTTPException(422, f"Stop {ref.id} does not exist")
-            stop_ids.append(ref.id)
-        else:
-            cur.execute("""INSERT INTO stops (name, is_landmark, lat, lng, data_source, collected_on)
-                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                        (ref.name, ref.is_landmark, ref.lat, ref.lng, body.data_source,
-                         body.collected_on))
-            stop_ids.append(cur.fetchone()["id"])
-    if len(stop_ids) != len(set(stop_ids)):
-        raise HTTPException(422, "A stop can appear only once on a route")
-
-    cur.execute("DELETE FROM route_stops WHERE route_id = %s", (route_id,))
-    for seq, stop_id in enumerate(stop_ids, start=1):
-        cur.execute("""INSERT INTO route_stops (route_id, stop_id, sequence_no)
-                       VALUES (%s, %s, %s)""", (route_id, stop_id, seq))
-    _recompute_distances(cur, route_id)
-    return route_id
+    return row["id"]
 
 
 @router.post("/routes", status_code=201)

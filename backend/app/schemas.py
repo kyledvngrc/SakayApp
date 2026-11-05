@@ -39,59 +39,35 @@ class LoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
-class StopIn(BaseModel):
+class LandmarkIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    landmark: str | None = Field(default=None, max_length=200)
-    is_landmark: bool = True          # stops created by hand are usually named places
+    description: str | None = Field(default=None, max_length=200)
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
     data_source: str | None = Field(default=None, max_length=200)
     collected_on: date | None = None
 
 
-class StopPatch(BaseModel):
+class LandmarkPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    landmark: str | None = Field(default=None, max_length=200)
-    is_landmark: bool | None = None
+    description: str | None = Field(default=None, max_length=200)
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
     data_source: str | None = Field(default=None, max_length=200)
     collected_on: date | None = None
 
 
-class RouteStopRef(BaseModel):
-    """An existing stop (id) or a new stop to create (name + lat/lng)."""
-    id: int | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    lat: float | None = Field(default=None, ge=-90, le=90)
-    lng: float | None = Field(default=None, ge=-180, le=180)
-    is_landmark: bool = False         # auto-placed stops are generic until renamed
-
-    @model_validator(mode="after")
-    def existing_or_new(self) -> "RouteStopRef":
-        if self.id is None and (self.name is None or self.lat is None or self.lng is None):
-            raise ValueError("a new stop needs name, lat and lng")
-        return self
-
-
 class RouteIn(BaseModel):
+    """A route is the line it travels along, drawn in the direction of travel."""
     code: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9_-]+$")
     name: str = Field(min_length=1, max_length=120)
     color: str = Field(default="#1E88E5", pattern=r"^#[0-9A-Fa-f]{6}$")
     vehicle_type: VehicleType = "jeepney"
     is_bidirectional: bool = True
     is_active: bool = True
-    path: list[Point] = Field(default_factory=list)
-    stops: list[RouteStopRef] = Field(min_length=2)
+    path: list[Point] = Field(min_length=2, max_length=5000)
     data_source: str | None = Field(default=None, max_length=200)
     collected_on: date | None = None
-
-    @model_validator(mode="after")
-    def no_repeated_stops(self) -> "RouteIn":
-        ids = [s.id for s in self.stops if s.id is not None]
-        if len(ids) != len(set(ids)):
-            raise ValueError("a stop can appear only once on a route")
-        return self
 
 
 class FareRuleIn(BaseModel):

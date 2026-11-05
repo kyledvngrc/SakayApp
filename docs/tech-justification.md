@@ -4,7 +4,7 @@ For each technology: what it does in SakayApp, why it was chosen, and alternativ
 
 | Technology | Role | Paradigm shown | Why chosen | Alternatives considered |
 |---|---|---|---|---|
-| SWI-Prolog | Route finding over `leg/3` facts | Logic | _TODO_ | _TODO_ |
+| SWI-Prolog | Trip search over `route/3` and `link/5` facts | Logic | _TODO_ | _TODO_ |
 | Python 3.12 | Back-end language | Imperative, Functional, OOP | _TODO_ | _TODO_ |
 | FastAPI | REST API | Imperative | _TODO_ | Flask, Django, Express |
 | pyswip | Python to Prolog bridge | — | _TODO_ | _TODO_ |

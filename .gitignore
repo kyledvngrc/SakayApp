@@ -29,3 +29,4 @@ mobile/android/
 
 # Local database data
 pgdata/
+backups/
