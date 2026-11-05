@@ -12,9 +12,10 @@ from typing import Iterator, Sequence
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from .config import settings
+from . import geo
+from .config import Settings, settings
 from .fare_calc import FareRule
-from .models import Network, Route, Stop
+from .models import Landmark, Network, Route
 
 
 @contextmanager
@@ -43,30 +44,22 @@ def fetch_all(sql: str, params: Sequence = ()) -> list[dict]:
         return list(cur.fetchall())
 
 
-def load_network() -> Network:
-    """Read stops, active routes, legs and current fare rules into a Network."""
-    stops: dict[int, Stop] = {}
-    for row in fetch_all("SELECT id, name, landmark, lat, lng, is_landmark FROM stops"):
-        stops[row["id"]] = Stop(id=row["id"], name=row["name"], landmark=row["landmark"],
-                                lat=row["lat"], lng=row["lng"], is_landmark=row["is_landmark"])
-
-    stop_ids_by_route: dict[int, list[int]] = {}
-    for row in fetch_all("SELECT route_id, stop_id FROM route_stops ORDER BY route_id, sequence_no"):
-        stop_ids_by_route.setdefault(row["route_id"], []).append(row["stop_id"])
-
+def load_network(s: Settings = settings) -> Network:
+    """Read active routes, landmarks and current fare rules into a Network."""
     routes: dict[str, Route] = {}
-    for row in fetch_all("""SELECT id, code, name, color, vehicle_type::text AS vehicle_type,
+    for row in fetch_all("""SELECT code, name, color, vehicle_type::text AS vehicle_type,
                                    is_bidirectional, path_geojson
-                            FROM routes WHERE is_active"""):
-        routes[row["code"]] = Route(
-            code=row["code"], name=row["name"], color=row["color"],
-            vehicle_type=row["vehicle_type"], is_bidirectional=row["is_bidirectional"],
-            stop_ids=tuple(stop_ids_by_route.get(row["id"], [])),
-            path_geojson=row["path_geojson"])
+                            FROM routes WHERE is_active ORDER BY code"""):
+        path = geo.geojson_path(row["path_geojson"])
+        if not path or len(path) < 2:
+            continue                                   # nothing to ride along
+        routes[row["code"]] = Route.from_line(
+            row["code"], row["name"], row["color"], row["vehicle_type"],
+            row["is_bidirectional"], path, s.loop_tolerance_m)
 
-    leg_km = {}
-    for row in fetch_all("SELECT route_code, from_stop, to_stop, km FROM v_legs"):
-        leg_km[(row["route_code"], row["from_stop"], row["to_stop"])] = row["km"]
+    landmarks = [Landmark(id=row["id"], name=row["name"], lat=row["lat"], lng=row["lng"],
+                          description=row["description"])
+                 for row in fetch_all("SELECT id, name, description, lat, lng FROM landmarks")]
 
     # Latest rule already in effect, per vehicle type.
     fare_rules: dict[str, FareRule] = {}
@@ -77,15 +70,13 @@ def load_network() -> Network:
                             ORDER BY vehicle_type, effective_date DESC"""):
         fare_rules[row["vehicle_type"]] = FareRule(**row)
 
-    return Network(stops=stops, routes=routes, leg_km=leg_km, fare_rules=fare_rules)
+    return Network.build(routes, landmarks, fare_rules, s)
 
 
-def log_search(origin_stop_id: int | None, dest_stop_id: int | None, rider_type: str,
-               result_count: int, top_route_codes: list[str]) -> None:
-    """Anonymous search log (no user id) for the popular-routes dashboard."""
+def log_search(rider_type: str, result_count: int, top_route_codes: list[str]) -> None:
+    """Anonymous search log (no user id, no locations) for the popular-routes dashboard."""
     with connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """INSERT INTO search_log (origin_stop_id, dest_stop_id, rider_type,
-                                       result_count, top_route_codes)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (origin_stop_id, dest_stop_id, rider_type, result_count, top_route_codes))
+            """INSERT INTO search_log (rider_type, result_count, top_route_codes)
+               VALUES (%s, %s, %s)""",
+            (rider_type, result_count, top_route_codes))

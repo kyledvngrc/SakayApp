@@ -24,16 +24,18 @@ class Settings:
     jwt_secret: str = os.getenv("JWT_SECRET", "")
     token_ttl_hours: int = 12
 
-    # Trip search
-    walk_radius_m: float = 500.0       # how far a commuter is asked to walk to/from a stop
-    candidate_stops: int = 8           # nearest stops tried at each end
+    # Trip search (distances in metres)
+    walk_radius_m: float = 500.0       # furthest walk to catch / from the last route
+    transfer_walk_m: float = 200.0     # furthest walk between two routes
     max_transfers: int = 2
     max_results: int = 5
+    max_access_points: int = 16        # places to catch a route tried at each end
 
-    # Time estimates (assumptions, shown to users as approximate)
-    walk_m_per_min: float = 80.0       # about 4.8 km/h
-    jeepney_kmh: float = 15.0          # average city speed incl. stops and traffic
-    wait_min_per_ride: float = 5.0     # waiting for a jeepney at each boarding
+    # Route geometry
+    sample_step_m: float = 20.0        # route lines are checked every this many metres
+    access_window_m: float = 150.0     # one access point per pass of a route
+    link_spacing_m: float = 300.0      # where routes run side by side, a transfer every ...
+    loop_tolerance_m: float = 100.0    # a one-way line ending this close to its start is a loop
 
 
 settings = Settings()

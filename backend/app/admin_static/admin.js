@@ -1,18 +1,18 @@
-// SakayApp admin page: enter routes, stops and fares on a map.
+// SakayApp admin page: draw routes, add landmarks and fares on a map.
 "use strict";
 
 const DAVAO = [7.0731, 125.6128];
-const REUSE_STOP_M = 30;      // a placed stop this close to an existing stop reuses it (shared/transfer stop)
-const FAR_FROM_LINE_M = 60;   // warn when a stop is this far from the drawn line
+const LOOP_TOLERANCE_M = 100;   // a one-way line ending this close to its start is a loop (matches config.py)
 const VEHICLES = ["jeepney", "bus", "tricycle", "uv_express"];
 
 const state = {
   token: sessionGet("sakay_token"),
-  data: { stops: [], routes: [], fare_rules: [] },
+  data: { landmarks: [], routes: [], fare_rules: [], transfer_points: [] },
   tab: "routes",
   draft: null,          // route being edited
-  tool: null,           // "draw" | "stops" | null
+  drawing: false,
   dirty: false,
+  newLandmarkMode: false,
   test: { origin: null, destination: null, rider: "regular", trips: [], selected: 0 },
 };
 
@@ -50,9 +50,14 @@ async function api(method, path, body) {
   return json;
 }
 
-const stopById = (id) => state.data.stops.find((s) => s.id === id);
-const routesUsingStop = (id) => state.data.routes.filter((r) => r.stops.some((s) => s.id === id));
+const landmarkById = (id) => state.data.landmarks.find((s) => s.id === id);
 const today = () => new Date().toISOString().slice(0, 10);
+const kindText = { both: "both ways", oneway: "one way", loop: "one-way loop" };
+
+function draftKind(d) {
+  if (d.is_bidirectional) return "both";
+  return d.path.length > 2 && Geo.dist(d.path[0], d.path[d.path.length - 1]) <= LOOP_TOLERANCE_M ? "loop" : "oneway";
+}
 
 // ---------------------------------------------------------------- map
 
@@ -64,7 +69,7 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const layers = {
   routes: L.layerGroup().addTo(map),
-  stops: L.layerGroup().addTo(map),
+  landmarks: L.layerGroup().addTo(map),
   draft: L.layerGroup().addTo(map),
   test: L.layerGroup().addTo(map),
 };
@@ -73,49 +78,51 @@ function dotIcon(color, size = 12) {
   return L.divIcon({ className: "", iconSize: [size, size],
     html: `<div class="stop-dot" style="width:${size}px;height:${size}px;background:${color}"></div>` });
 }
-function numIcon(n, color) {
+function labelIcon(text, color) {
   return L.divIcon({ className: "", iconSize: [20, 20],
-    html: `<div class="num-icon" style="width:20px;height:20px;background:${color}">${n}</div>` });
+    html: `<div class="num-icon" style="width:20px;height:20px;background:${color}">${text}</div>` });
 }
+
+const routeLine = (r) => (r.path_geojson?.coordinates ?? []).map(([lng, lat]) => [lat, lng]);
 
 function drawNetwork() {
   layers.routes.clearLayers();
-  layers.stops.clearLayers();
+  layers.landmarks.clearLayers();
   const editingId = state.draft?.id;
   for (const r of state.data.routes) {
     if (r.id === editingId) continue;
-    const line = r.path_geojson?.coordinates?.map(([lng, lat]) => [lat, lng]) ??
-      r.stops.map((s) => stopById(s.id)).filter(Boolean).map((s) => [s.lat, s.lng]);
+    const line = routeLine(r);
     if (line.length < 2) continue;
     L.polyline(line, { color: r.color, weight: 4, opacity: state.draft || !r.is_active ? 0.35 : 0.8,
-                       dashArray: r.is_active ? null : "6 6" })
+                       dashArray: r.is_active ? null : "6 6", interactive: !state.drawing })
       .bindTooltip(`${esc(r.code)} · ${esc(r.name)}`).addTo(layers.routes);
   }
+  if (state.tab === "routes" && !state.draft) {
+    for (const t of state.data.transfer_points) {
+      L.circleMarker([t.lat, t.lng], { radius: 4, color: "#6a1b9a", weight: 1, fillOpacity: 0.8 })
+        .bindTooltip(`${esc(t.from)} → ${esc(t.to)} · ${t.walk_m < 15 ? "lines meet" : `walk ${t.walk_m} m`}`)
+        .addTo(layers.routes);
+    }
+  }
   if (state.tab === "test") return;
-  for (const s of state.data.stops) {
-    const shared = routesUsingStop(s.id).length;
+  for (const s of state.data.landmarks) {
     const m = L.marker([s.lat, s.lng], {
-      icon: dotIcon(shared > 1 ? "#6a1b9a" : shared ? "#455a64" : "#9e9e9e", shared > 1 ? 14 : 10),
-      draggable: state.tab === "stops",
+      icon: dotIcon("#f2a900", 12),
+      draggable: state.tab === "landmarks",
       title: s.name,
     });
-    m.on("click", () => onStopClick(s));
-    m.on("dragend", (e) => onStopDragged(s, e.target.getLatLng()));
-    m.bindTooltip(`${esc(s.name)}${shared ? ` · ${shared} route(s)` : ""}`);
-    m.addTo(layers.stops);
+    m.on("click", () => onLandmarkClick(s));
+    m.on("dragend", (e) => onLandmarkDragged(s, e.target.getLatLng()));
+    m.bindTooltip(`★ ${esc(s.name)}`);
+    m.addTo(layers.landmarks);
   }
 }
 
 map.on("click", (e) => {
   const p = { lat: e.latlng.lat, lng: e.latlng.lng };
-  if (state.tab === "routes" && state.draft) {
-    if (state.tool === "draw") addVertex(p);
-    else if (state.tool === "stops") addStopAt(p);
-  } else if (state.tab === "stops" && state.newStopMode) {
-    createStopAt(p);
-  } else if (state.tab === "test") {
-    setTestPoint(p);
-  }
+  if (state.tab === "routes" && state.draft && state.drawing) addVertex(p);
+  else if (state.tab === "landmarks" && state.newLandmarkMode) createLandmarkAt(p);
+  else if (state.tab === "test") setTestPoint(p);
 });
 
 // ---------------------------------------------------------------- auth
@@ -153,7 +160,8 @@ async function start() {
   try {
     await loadData();
     render();
-    status(`${state.data.routes.length} routes, ${state.data.stops.length} stops loaded`);
+    status(`${state.data.routes.length} routes, ${state.data.landmarks.length} landmarks, ` +
+           `${state.data.transfer_points.length} transfer points`);
   } catch (err) { status(err.message, true); }
 }
 
@@ -162,7 +170,7 @@ async function start() {
 function setTab(tab) {
   if (state.draft && state.dirty && !confirm("Discard unsaved route changes?")) return;
   state.tab = tab;
-  state.draft = null; state.tool = null; state.dirty = false; state.newStopMode = false;
+  state.draft = null; state.drawing = false; state.dirty = false; state.newLandmarkMode = false;
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   layers.draft.clearLayers();
   layers.test.clearLayers();
@@ -172,13 +180,13 @@ function setTab(tab) {
 function render() {
   const panel = $("#panel");
   if (state.tab === "routes") panel.innerHTML = state.draft ? routeEditorHtml() : routeListHtml();
-  if (state.tab === "stops") panel.innerHTML = stopsHtml();
+  if (state.tab === "landmarks") panel.innerHTML = landmarksHtml();
   if (state.tab === "fares") panel.innerHTML = faresHtml();
   if (state.tab === "test") panel.innerHTML = testHtml();
   drawNetwork();
   if (state.draft) drawDraft();
   if (state.tab === "test") drawTest();
-  map.getContainer().style.cursor = state.tool || state.newStopMode || state.tab === "test" ? "crosshair" : "";
+  map.getContainer().style.cursor = state.drawing || state.newLandmarkMode || state.tab === "test" ? "crosshair" : "";
 }
 
 // ---------------------------------------------------------------- routes: list
@@ -188,19 +196,20 @@ function routeListHtml() {
     <li data-route="${r.id}">
       <span class="badge" style="background:${esc(r.color)}">${esc(r.code)}</span>
       <span class="grow"><div>${esc(r.name)}</div>
-        <div class="sub">${r.stops.length} stops · ${r.total_km.toFixed(2)} km
-          ${r.is_bidirectional ? "· both ways" : "· one way"}</div></span>
+        <div class="sub">${r.length_km.toFixed(2)} km · ${kindText[draftKind({ is_bidirectional: r.is_bidirectional,
+          path: routeLine(r).map(([lat, lng]) => ({ lat, lng })) })]}</div></span>
       ${r.is_active ? "" : '<span class="tag">inactive</span>'}
     </li>`).join("");
   return `
     <div class="actions"><button class="primary" data-act="new-route">+ New route</button></div>
     ${state.data.routes.length ? `<ul class="list">${items}</ul>` : '<p class="muted">No routes yet.</p>'}
-    <p class="hint">Gray dots are stops; purple dots are shared by 2+ routes (transfer points).</p>`;
+    <p class="hint">Purple dots are transfer points, found automatically where routes cross or pass within
+      a short walk of each other. Yellow dots are landmarks.</p>`;
 }
 
 function editRoute(route) {
   const r = route ?? { code: "", name: "", color: "#1E88E5", vehicle_type: "jeepney",
-    is_bidirectional: true, is_active: true, path_geojson: null, stops: [],
+    is_bidirectional: true, is_active: true, path_geojson: null,
     data_source: "", collected_on: today() };
   state.draft = {
     id: r.id ?? null,
@@ -208,14 +217,11 @@ function editRoute(route) {
     is_bidirectional: r.is_bidirectional, is_active: r.is_active,
     data_source: r.data_source ?? "", collected_on: r.collected_on ?? "",
     path: (r.path_geojson?.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
-    stops: r.stops.map((s) => stopById(s.id)).filter(Boolean)
-      .map((s) => ({ id: s.id, name: s.name, lat: s.lat, lng: s.lng, is_landmark: s.is_landmark })),
   };
-  state.tool = state.draft.path.length < 2 ? "draw" : null;
+  state.drawing = state.draft.path.length < 2;
   state.dirty = false;
   render();
-  const pts = [...state.draft.path, ...state.draft.stops];
-  if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])).pad(0.2));
+  if (state.draft.path.length) map.fitBounds(L.latLngBounds(state.draft.path.map((p) => [p.lat, p.lng])).pad(0.2));
 }
 
 // ---------------------------------------------------------------- routes: editor
@@ -223,23 +229,7 @@ function editRoute(route) {
 function routeEditorHtml() {
   const d = state.draft;
   const len = d.path.length >= 2 ? Geo.pathLength(d.path) : 0;
-  const stops = d.stops.map((s, i) => {
-    const off = d.path.length >= 2 ? Geo.positionAlong(d.path, s).offset : 0;
-    const others = s.id ? routesUsingStop(s.id).filter((r) => r.id !== d.id).map((r) => r.code) : [];
-    return `
-      <li>
-        <span class="num" style="background:${esc(d.color)}">${i + 1}</span>
-        ${s.id ? `<span class="grow">${s.is_landmark ? "★ " : ""}${esc(s.name)}
-              ${others.length ? `<span class="shared">· also ${esc(others.join(", "))}</span>` : ""}</span>`
-               : `<button class="link star ${s.is_landmark ? "on" : ""}" data-act="toggle-landmark" data-i="${i}"
-                    title="${s.is_landmark ? "Landmark: named in directions" : "Generic stop: directions say “near” the closest landmark"}">${s.is_landmark ? "★" : "☆"}</button>
-                  <input class="grow" data-stop-name="${i}" value="${esc(s.name)}" aria-label="Stop name">`}
-        ${off > FAR_FROM_LINE_M ? `<span class="far" title="Far from the line">${Math.round(off)} m off</span>` : ""}
-        <button class="link" data-act="zoom-stop" data-i="${i}" title="Show on map">◎</button>
-        <button class="link" data-act="remove-stop" data-i="${i}" title="Remove from route">✕</button>
-      </li>`;
-  }).join("");
-
+  const kind = draftKind(d);
   return `
     <div class="actions"><button class="link" data-act="back">← All routes</button></div>
     <h2>${d.id ? "Edit route" : "New route"}</h2>
@@ -247,6 +237,8 @@ function routeEditorHtml() {
       <label class="shrink" style="width:90px">Code <input data-f="code" value="${esc(d.code)}" placeholder="R03" maxlength="20"></label>
       <label>Name <input data-f="name" value="${esc(d.name)}" placeholder="Toril – Bankerohan"></label>
     </div>
+    <p class="hint">Code: a short label for badges (letters, digits, - or _), e.g. the signboard name.
+      Name it “Start – End” in the direction you draw, so directions can say “toward End”.</p>
     <div class="row">
       <label class="shrink" style="width:70px">Color <input data-f="color" type="color" value="${esc(d.color)}"></label>
       <label>Vehicle
@@ -260,26 +252,17 @@ function routeEditorHtml() {
       <label class="shrink" style="width:140px">Collected on <input data-f="collected_on" type="date" value="${esc(d.collected_on)}"></label>
     </div>
 
-    <h2>1 · Route line <span class="muted small">${d.path.length} points · ${(len / 1000).toFixed(2)} km</span></h2>
-    <p class="hint">Turn on drawing, then click along the streets in the direction the jeepney travels. Drag points to adjust; right-click a point to delete it.</p>
+    <h2>Route line <span class="muted small">${d.path.length} points · ${(len / 1000).toFixed(2)} km · ${kindText[kind]}</span></h2>
+    <p class="hint">Click along the streets in the order the jeepney drives, from <b>S</b> (start) to <b>E</b> (end).
+      Click on the line to insert a point, drag points to adjust, right-click a point to delete it.
+      ${d.is_bidirectional ? "" : "For a one-way loop, finish back at the start; it is detected automatically."}
+      Commuters can board and get off anywhere on the line; transfers are found where lines cross or come within 200 m.</p>
     <div class="actions">
-      <button data-act="tool-draw" class="${state.tool === "draw" ? "on" : ""}">${state.tool === "draw" ? "Drawing… (click map)" : "Draw line"}</button>
+      <button data-act="tool-draw" class="${state.drawing ? "on" : ""}">${state.drawing ? "Drawing… (click map)" : "Draw / edit line"}</button>
       <button data-act="undo-vertex" ${d.path.length ? "" : "disabled"}>Undo point</button>
+      <button data-act="reverse-line" ${d.path.length >= 2 ? "" : "disabled"}>Reverse direction</button>
       <button data-act="clear-line" class="danger" ${d.path.length ? "" : "disabled"}>Clear line</button>
     </div>
-
-    <h2>2 · Stops <span class="muted small">${d.stops.length} stops</span></h2>
-    <p class="hint">Stops are kept in order along the line. A stop placed within ${REUSE_STOP_M} m of an existing stop reuses it, so routes that meet share a transfer stop.
-      Rename stops at terminals, malls, schools and corners; they become ★ landmarks that directions name ("get off at …"). Other stops are described as "near" the closest landmark.</p>
-    <div class="actions">
-      <button data-act="tool-stops" class="${state.tool === "stops" ? "on" : ""}" ${d.path.length >= 2 ? "" : "disabled"}>${state.tool === "stops" ? "Placing… (click map)" : "Place stops"}</button>
-    </div>
-    <div class="row">
-      <label>Auto-place every <input id="spacing" type="number" min="100" max="1000" step="50" value="250"></label>
-      <span class="shrink muted" style="padding-top:18px">m</span>
-      <button class="shrink" data-act="auto-stops" style="margin-top:14px" ${d.path.length >= 2 ? "" : "disabled"}>Auto-place</button>
-    </div>
-    <ul class="stop-list">${stops || '<li class="muted">No stops yet.</li>'}</ul>
 
     <div class="actions" style="margin-top:16px">
       <button class="primary" data-act="save-route">Save route</button>
@@ -292,100 +275,50 @@ function drawDraft() {
   const d = state.draft;
   layers.draft.clearLayers();
   if (d.path.length >= 2) {
-    L.polyline(d.path.map((p) => [p.lat, p.lng]), { color: d.color, weight: 6, opacity: 0.9 }).addTo(layers.draft);
+    const line = L.polyline(d.path.map((p) => [p.lat, p.lng]), { color: d.color, weight: 6, opacity: 0.9 });
+    line.on("click", (e) => {
+      if (!state.drawing) return;
+      L.DomEvent.stopPropagation(e);
+      const p = { lat: e.latlng.lat, lng: e.latlng.lng };
+      d.path.splice(Geo.nearestSegment(d.path, p) + 1, 0, p);
+      changed(); render();
+    });
+    line.addTo(layers.draft);
   }
-  if (state.tool === "draw") {
+  if (state.drawing) {
     d.path.forEach((p, i) => {
       const m = L.marker([p.lat, p.lng], { icon: dotIcon("#fff", 12), draggable: true });
       m.on("drag", (e) => { d.path[i] = { lat: e.latlng.lat, lng: e.latlng.lng }; });
-      m.on("dragend", () => { changed(); sortStops(); render(); });
-      m.on("contextmenu", () => { d.path.splice(i, 1); changed(); sortStops(); render(); });
+      m.on("dragend", () => { changed(); render(); });
+      m.on("contextmenu", () => { d.path.splice(i, 1); changed(); render(); });
       m.addTo(layers.draft);
     });
   }
-  d.stops.forEach((s, i) => L.marker([s.lat, s.lng], { icon: numIcon(i + 1, d.color), interactive: false })
-    .addTo(layers.draft));
+  if (d.path.length) {
+    L.marker([d.path[0].lat, d.path[0].lng], { icon: labelIcon("S", "#2e7d32"), interactive: false }).addTo(layers.draft);
+  }
+  if (d.path.length >= 2) {
+    const end = d.path[d.path.length - 1];
+    L.marker([end.lat, end.lng], { icon: labelIcon("E", "#c62828"), interactive: false }).addTo(layers.draft);
+  }
 }
 
 function changed() { state.dirty = true; }
 
-function sortStops() {
-  const d = state.draft;
-  if (d.path.length < 2) return;
-  d.stops.sort((a, b) => Geo.positionAlong(d.path, a).along - Geo.positionAlong(d.path, b).along);
-}
-
 function addVertex(p) {
   state.draft.path.push(p);
-  changed(); sortStops(); render();
-}
-
-// Nearest existing stop (not already on this draft) within REUSE_STOP_M.
-function reusableStop(p) {
-  const onDraft = new Set(state.draft.stops.map((s) => s.id).filter(Boolean));
-  return state.data.stops
-    .filter((s) => !onDraft.has(s.id))
-    .map((s) => ({ s, d: Geo.dist(s, p) }))
-    .filter((x) => x.d <= REUSE_STOP_M)
-    .sort((a, b) => a.d - b.d)[0]?.s;
-}
-
-function newStopName() {
-  const code = state.draft.code || "Route";
-  const newCount = state.draft.stops.filter((s) => !s.id).length;   // reused stops keep their names
-  return `${code} stop ${newCount + 1}`;
-}
-
-function addStopAt(p) {
-  const d = state.draft;
-  const existing = reusableStop(p);
-  if (existing) d.stops.push(draftStop(existing));
-  else d.stops.push({ id: null, name: newStopName(), lat: p.lat, lng: p.lng, is_landmark: false });
-  changed(); sortStops(); render();
-}
-
-function addExistingStop(s) {
-  const d = state.draft;
-  if (d.stops.some((x) => x.id === s.id)) { status(`${s.name} is already on this route`); return; }
-  d.stops.push(draftStop(s));
-  changed(); sortStops(); render();
-}
-
-const draftStop = (s) => ({ id: s.id, name: s.name, lat: s.lat, lng: s.lng, is_landmark: s.is_landmark });
-
-function autoPlaceStops() {
-  const d = state.draft;
-  const spacing = Math.max(100, Number($("#spacing").value) || 250);
-  let added = 0, reused = 0;
-  // 1. Existing stops the line passes through become shared (transfer) stops.
-  const onDraft = new Set(d.stops.map((s) => s.id).filter(Boolean));
-  for (const s of state.data.stops) {
-    if (!onDraft.has(s.id) && Geo.positionAlong(d.path, s).offset <= REUSE_STOP_M) {
-      d.stops.push(draftStop(s)); reused++;
-    }
-  }
-  // 2. Fill the gaps with evenly spaced stops.
-  for (const p of Geo.pointsEvery(d.path, spacing)) {
-    if (d.stops.some((s) => Geo.dist(s, p) < spacing / 2)) continue;   // already a stop nearby
-    const existing = reusableStop(p);
-    if (existing) { d.stops.push(draftStop(existing)); reused++; }
-    else { d.stops.push({ id: null, name: newStopName(), lat: p.lat, lng: p.lng, is_landmark: false }); added++; }
-  }
-  changed(); sortStops(); render();
-  status(`Added ${added} new stops, reused ${reused} existing. Rename the ones at landmarks; renamed stops become ★ landmarks.`);
+  changed(); render();
 }
 
 async function saveRoute() {
   const d = state.draft;
   if (!d.code || !d.name) return status("Give the route a code and a name", true);
-  if (d.stops.length < 2) return status("A route needs at least 2 stops", true);
+  if (d.path.length < 2) return status("Draw the route line first (at least 2 points)", true);
   const body = {
     code: d.code.trim(), name: d.name.trim(), color: d.color, vehicle_type: d.vehicle_type,
     is_bidirectional: d.is_bidirectional, is_active: d.is_active,
     data_source: d.data_source || null, collected_on: d.collected_on || null,
     path: d.path,
-    stops: d.stops.map((s) => (s.id ? { id: s.id }
-      : { name: s.name.trim() || newStopName(), lat: s.lat, lng: s.lng, is_landmark: !!s.is_landmark })),
   };
   try {
     status("Saving…");
@@ -393,13 +326,13 @@ async function saveRoute() {
     await loadData();
     state.dirty = false;
     editRoute(state.data.routes.find((r) => r.id === res.id));
-    status(`Saved ${body.code}. Network reloaded: ${res.network.routes} routes, ${res.network.legs} legs.`);
+    status(`Saved ${body.code}. Network reloaded: ${res.network.routes} routes, ${res.network.transfer_points} transfer points.`);
   } catch (err) { status(err.message, true); }
 }
 
 async function deleteRoute() {
   const d = state.draft;
-  if (!confirm(`Delete route ${d.code}? Its stops are kept.`)) return;
+  if (!confirm(`Delete route ${d.code}?`)) return;
   try {
     await api("DELETE", `/admin/routes/${d.id}`);
     await loadData();
@@ -409,99 +342,93 @@ async function deleteRoute() {
   } catch (err) { status(err.message, true); }
 }
 
-// ---------------------------------------------------------------- stops tab
+// ---------------------------------------------------------------- landmarks tab
 
-function stopsHtml() {
-  const q = (state.stopFilter || "").toLowerCase();
-  const sel = state.selectedStop && stopById(state.selectedStop);
-  const rows = state.data.stops
-    .filter((s) => !q || s.name.toLowerCase().includes(q) || (s.landmark || "").toLowerCase().includes(q))
+function landmarksHtml() {
+  const q = (state.landmarkFilter || "").toLowerCase();
+  const sel = state.selectedLandmark && landmarkById(state.selectedLandmark);
+  const rows = state.data.landmarks
+    .filter((s) => !q || s.name.toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q))
     .slice(0, 300)
-    .map((s) => {
-      const rs = routesUsingStop(s.id);
-      return `<li data-stop="${s.id}">
-        <span class="grow"><div>${s.is_landmark ? "★ " : ""}${esc(s.name)}</div>
-          <div class="sub">${rs.length ? esc(rs.map((r) => r.code).join(", ")) : "not on any route"}${s.landmark ? " · " + esc(s.landmark) : ""}</div></span>
-      </li>`;
-    }).join("");
+    .map((s) => `<li data-landmark="${s.id}">
+        <span class="grow"><div>★ ${esc(s.name)}</div>
+          ${s.description ? `<div class="sub">${esc(s.description)}</div>` : ""}</span>
+      </li>`).join("");
   return `
     <div class="actions">
-      <button data-act="new-stop" class="${state.newStopMode ? "on" : ""}">${state.newStopMode ? "Click the map…" : "+ New stop"}</button>
+      <button data-act="new-landmark" class="${state.newLandmarkMode ? "on" : ""}">${state.newLandmarkMode ? "Click the map…" : "+ New landmark"}</button>
     </div>
-    <p class="hint">Drag a stop on the map to move it; route distances update automatically. ★ marks landmarks used in directions.</p>
-    ${sel ? stopFormHtml(sel) : ""}
-    <input id="stop-filter" placeholder="Filter stops" value="${esc(state.stopFilter || "")}">
-    <ul class="list">${rows || '<li class="muted">No stops.</li>'}</ul>`;
+    <p class="hint">Optional. Landmarks name the places in directions (“get off near SM Ecoland”).
+      Add them at terminals, malls, schools, churches and well-known corners, close to the road. Drag one on the map to move it.</p>
+    ${sel ? landmarkFormHtml(sel) : ""}
+    <input id="landmark-filter" placeholder="Filter landmarks" value="${esc(state.landmarkFilter || "")}">
+    <ul class="list">${rows || '<li class="muted">No landmarks yet.</li>'}</ul>`;
 }
 
-function stopFormHtml(s) {
-  const rs = routesUsingStop(s.id);
+function landmarkFormHtml(s) {
   return `
     <div class="card" style="width:100%;padding:12px;margin-bottom:12px">
-      <label>Name <input id="sf-name" value="${esc(s.name)}"></label>
-      <label class="check"><input type="checkbox" id="sf-is-landmark" ${s.is_landmark ? "checked" : ""}> ★ Landmark (named in directions)</label>
-      <label>Description <input id="sf-landmark" value="${esc(s.landmark)}" placeholder="e.g. in front of SM Ecoland"></label>
+      <label>Name <input id="lf-name" value="${esc(s.name)}"></label>
+      <label>Description <input id="lf-description" value="${esc(s.description)}" placeholder="e.g. in front of the main gate"></label>
       <div class="row">
-        <label>Data source <input id="sf-source" value="${esc(s.data_source)}"></label>
-        <label class="shrink" style="width:140px">Collected on <input id="sf-date" type="date" value="${esc(s.collected_on)}"></label>
+        <label>Data source <input id="lf-source" value="${esc(s.data_source)}"></label>
+        <label class="shrink" style="width:140px">Collected on <input id="lf-date" type="date" value="${esc(s.collected_on)}"></label>
       </div>
-      <p class="hint">${s.lat.toFixed(6)}, ${s.lng.toFixed(6)} · ${rs.length ? "on " + esc(rs.map((r) => r.code).join(", ")) : "not on any route"}</p>
+      <p class="hint">${s.lat.toFixed(6)}, ${s.lng.toFixed(6)}</p>
       <div class="actions">
-        <button class="primary" data-act="save-stop">Save stop</button>
-        <button data-act="close-stop">Close</button>
-        <button class="danger" data-act="delete-stop" ${rs.length ? 'disabled title="Remove it from its routes first"' : ""}>Delete</button>
+        <button class="primary" data-act="save-landmark">Save landmark</button>
+        <button data-act="close-landmark">Close</button>
+        <button class="danger" data-act="delete-landmark">Delete</button>
       </div>
     </div>`;
 }
 
-function onStopClick(s) {
-  // Marker clicks don't reach the map, so handle the editing tools here too.
-  if (state.tab === "routes" && state.draft && state.tool === "draw") return addVertex({ lat: s.lat, lng: s.lng });
-  if (state.tab === "routes" && state.draft && state.tool === "stops") return addExistingStop(s);
-  if (state.tab === "stops") { state.selectedStop = s.id; render(); map.panTo([s.lat, s.lng]); }
+function onLandmarkClick(s) {
+  // Marker clicks don't reach the map, so pass them to the line tool too.
+  if (state.tab === "routes" && state.draft && state.drawing) return addVertex({ lat: s.lat, lng: s.lng });
+  if (state.tab === "landmarks") { state.selectedLandmark = s.id; render(); map.panTo([s.lat, s.lng]); }
 }
 
-async function onStopDragged(s, latlng) {
+async function onLandmarkDragged(s, latlng) {
   if (!confirm(`Move "${s.name}" here?`)) return render();
   try {
-    await api("PATCH", `/admin/stops/${s.id}`, { lat: latlng.lat, lng: latlng.lng });
+    await api("PATCH", `/admin/landmarks/${s.id}`, { lat: latlng.lat, lng: latlng.lng });
     await loadData(); render();
     status(`Moved ${s.name}`);
   } catch (err) { status(err.message, true); render(); }
 }
 
-async function createStopAt(p) {
-  const name = prompt("Stop name (e.g. the nearest landmark):");
-  state.newStopMode = false;
+async function createLandmarkAt(p) {
+  const name = prompt("Landmark name (e.g. SM Ecoland):");
+  state.newLandmarkMode = false;
   if (!name) return render();
   try {
-    const res = await api("POST", "/admin/stops", { name, lat: p.lat, lng: p.lng, collected_on: today() });
+    const res = await api("POST", "/admin/landmarks", { name, lat: p.lat, lng: p.lng, collected_on: today() });
     await loadData();
-    state.selectedStop = res.id;
+    state.selectedLandmark = res.id;
     render();
     status(`Created ${name}`);
   } catch (err) { status(err.message, true); render(); }
 }
 
-async function saveStop() {
-  const id = state.selectedStop;
+async function saveLandmark() {
+  const id = state.selectedLandmark;
   try {
-    await api("PATCH", `/admin/stops/${id}`, {
-      name: $("#sf-name").value.trim(), landmark: $("#sf-landmark").value.trim() || null,
-      is_landmark: $("#sf-is-landmark").checked,
-      data_source: $("#sf-source").value.trim() || null, collected_on: $("#sf-date").value || null,
+    await api("PATCH", `/admin/landmarks/${id}`, {
+      name: $("#lf-name").value.trim(), description: $("#lf-description").value.trim() || null,
+      data_source: $("#lf-source").value.trim() || null, collected_on: $("#lf-date").value || null,
     });
     await loadData(); render();
-    status("Stop saved");
+    status("Landmark saved");
   } catch (err) { status(err.message, true); }
 }
 
-async function deleteStop() {
-  const s = stopById(state.selectedStop);
-  if (!confirm(`Delete stop "${s.name}"?`)) return;
+async function deleteLandmark() {
+  const s = landmarkById(state.selectedLandmark);
+  if (!confirm(`Delete landmark "${s.name}"?`)) return;
   try {
-    await api("DELETE", `/admin/stops/${s.id}`);
-    state.selectedStop = null;
+    await api("DELETE", `/admin/landmarks/${s.id}`);
+    state.selectedLandmark = null;
     await loadData(); render();
     status(`Deleted ${s.name}`);
   } catch (err) { status(err.message, true); }
@@ -574,6 +501,8 @@ async function deleteFare() {
 
 // ---------------------------------------------------------------- test tab
 
+const distText = (m) => (m < 950 ? `${Math.max(10, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1)} km`);
+
 function testHtml() {
   const t = state.test;
   const pt = (p) => (p ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : "—");
@@ -584,8 +513,9 @@ function testHtml() {
           const r = state.data.routes.find((x) => x.code === c);
           return `<span class="badge" style="background:${esc(r?.color ?? "#555")}">${esc(c)}</span>`;
         }).join(" → ")}</span>
-        <span class="shrink">${trip.minutes} min · ${trip.fare_available ? "₱" + trip.total_fare.toFixed(2) : "fare n/a"}</span>
+        <span class="shrink">${trip.fare_available ? "₱" + trip.total_fare.toFixed(2) : "fare n/a"}</span>
       </div>
+      <div class="sub muted small">${trip.ride_km.toFixed(1)} km ride · ${distText(trip.walking_m)} walk</div>
       <ol>${trip.segments.map((s) => `<li>${esc(s.instruction)}${s.kind === "ride" && s.fare != null ? ` · ₱${s.fare.toFixed(2)}` : ""}</li>`).join("")}</ol>
     </div>`).join("");
   return `
@@ -627,7 +557,9 @@ function drawTest() {
     if (s.kind === "walk") L.polyline(line, { color: "#555", weight: 3, dashArray: "4 6" }).addTo(layers.test);
     else {
       L.polyline(line, { color: s.route.color, weight: 6 }).bindTooltip(s.route.code).addTo(layers.test);
-      [s.board, s.alight].forEach((st) => L.marker([st.lat, st.lng], { icon: dotIcon(s.route.color, 12), title: st.name }).addTo(layers.test));
+      [["Get on", s.board], ["Get off", s.alight]].forEach(([what, p]) =>
+        L.marker([p.lat, p.lng], { icon: dotIcon(s.route.color, 12),
+          title: `${what} ${s.route.code}${p.place.name ? ` (${p.place.kind} ${p.place.name})` : ""}` }).addTo(layers.test));
     }
   }
 }
@@ -640,8 +572,8 @@ document.addEventListener("click", (e) => {
 
   const routeLi = e.target.closest("[data-route]");
   if (routeLi) return editRoute(state.data.routes.find((r) => r.id === Number(routeLi.dataset.route)));
-  const stopLi = e.target.closest("[data-stop]");
-  if (stopLi) { const s = stopById(Number(stopLi.dataset.stop)); return onStopClick(s); }
+  const landmarkLi = e.target.closest("[data-landmark]");
+  if (landmarkLi) return onLandmarkClick(landmarkById(Number(landmarkLi.dataset.landmark)));
   const fareTr = e.target.closest("[data-fare]");
   if (fareTr) { state.editingFare = state.data.fare_rules.find((f) => f.id === Number(fareTr.dataset.fare)); return render(); }
   const tripDiv = e.target.closest("[data-trip]");
@@ -649,25 +581,20 @@ document.addEventListener("click", (e) => {
 
   const act = e.target.closest("[data-act]")?.dataset.act;
   if (!act) return;
-  const i = Number(e.target.closest("[data-i]")?.dataset.i);
   const d = state.draft;
   const actions = {
     "new-route": () => editRoute(null),
     back: () => setTab("routes"),
-    "tool-draw": () => { state.tool = state.tool === "draw" ? null : "draw"; render(); },
-    "tool-stops": () => { state.tool = state.tool === "stops" ? null : "stops"; render(); },
-    "undo-vertex": () => { d.path.pop(); changed(); sortStops(); render(); },
+    "tool-draw": () => { state.drawing = !state.drawing; render(); },
+    "undo-vertex": () => { d.path.pop(); changed(); render(); },
+    "reverse-line": () => { d.path.reverse(); changed(); render(); },
     "clear-line": () => { if (confirm("Clear the whole line?")) { d.path = []; changed(); render(); } },
-    "auto-stops": autoPlaceStops,
-    "remove-stop": () => { d.stops.splice(i, 1); changed(); render(); },
-    "toggle-landmark": () => { d.stops[i].is_landmark = !d.stops[i].is_landmark; changed(); render(); },
-    "zoom-stop": () => map.setView([d.stops[i].lat, d.stops[i].lng], 17),
     "save-route": saveRoute,
     "delete-route": deleteRoute,
-    "new-stop": () => { state.newStopMode = !state.newStopMode; render(); },
-    "save-stop": saveStop,
-    "close-stop": () => { state.selectedStop = null; render(); },
-    "delete-stop": deleteStop,
+    "new-landmark": () => { state.newLandmarkMode = !state.newLandmarkMode; render(); },
+    "save-landmark": saveLandmark,
+    "close-landmark": () => { state.selectedLandmark = null; render(); },
+    "delete-landmark": deleteLandmark,
     "cancel-fare": () => { state.editingFare = null; render(); },
     "delete-fare": deleteFare,
     "test-reset": () => { state.test = { ...state.test, origin: null, destination: null, trips: [], notice: null }; render(); },
@@ -682,24 +609,14 @@ document.addEventListener("input", (e) => {
     d[f] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     changed();
     if (f === "color") drawDraft();
+    if (f === "is_bidirectional") render();
     return;
   }
-  if (d && e.target.dataset.stopName !== undefined) {
-    const st = d.stops[Number(e.target.dataset.stopName)];
-    st.name = e.target.value;
-    if (!st.is_landmark) {                    // renaming a generic stop makes it a landmark
-      st.is_landmark = true;
-      const star = e.target.parentElement.querySelector(".star");
-      if (star) { star.textContent = "★"; star.classList.add("on"); }
-    }
-    changed();
-    return;
-  }
-  if (e.target.id === "stop-filter") {
-    state.stopFilter = e.target.value;
+  if (e.target.id === "landmark-filter") {
+    state.landmarkFilter = e.target.value;
     const pos = e.target.selectionStart;
     render();
-    const input = $("#stop-filter"); input.focus(); input.setSelectionRange(pos, pos);
+    const input = $("#landmark-filter"); input.focus(); input.setSelectionRange(pos, pos);
   }
 });
 
