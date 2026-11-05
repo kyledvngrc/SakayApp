@@ -12,12 +12,15 @@ type Props = {
   origin: Endpoint | null;
   destination: Endpoint | null;
   bottomInset: number;
+  topInset?: number;
+  followUser?: boolean; // keep the map centred on the commuter (live trip)
+  onUserPan?: () => void;
   onLongPress?: (p: LatLng) => void;
   onRegionChangeComplete?: (center: LatLng) => void;
 };
 
 export const TripMap = forwardRef<MapView, Props>(function TripMap(
-  { trip, origin, destination, bottomInset, onLongPress, onRegionChangeComplete },
+  { trip, origin, destination, bottomInset, topInset = 0, followUser, onUserPan, onLongPress, onRegionChangeComplete },
   ref,
 ) {
   const c = useColors();
@@ -29,7 +32,9 @@ export const TripMap = forwardRef<MapView, Props>(function TripMap(
       showsUserLocation
       showsMyLocationButton={false}
       showsPointsOfInterests
-      mapPadding={{ top: 0, left: 0, right: 0, bottom: bottomInset }}
+      followsUserLocation={followUser}
+      onPanDrag={onUserPan}
+      mapPadding={{ top: topInset, left: 0, right: 0, bottom: bottomInset }}
       onLongPress={(e: LongPressEvent) =>
         onLongPress?.({ lat: e.nativeEvent.coordinate.latitude, lng: e.nativeEvent.coordinate.longitude })
       }

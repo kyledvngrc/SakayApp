@@ -17,6 +17,7 @@ export default function RootLayout() {
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="route/[code]" options={{ title: 'Route', headerBackTitle: 'Routes' }} />
+            <Stack.Screen name="live" options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false }} />
           </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>

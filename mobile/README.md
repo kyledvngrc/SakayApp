@@ -20,4 +20,11 @@ server, set `EXPO_PUBLIC_API_URL`, e.g. `EXPO_PUBLIC_API_URL=http://192.168.1.20
 - `src/lib/` API client, types, formatting and geometry helpers
 - `src/hooks/` GPS location, remembered rider type
 
-Checks: `npx tsc --noEmit` and `npx expo lint`.
+## Live trip
+Plan → Start (directions) → **Go** follows you with GPS: "Get off in 400 m",
+then "Get off soon, say para" (vibrates, and speaks if sound is on) and
+"Get off here". Keep the app open: Expo Go has no background location, so the
+screen stays on during a live trip. Alerts with the screen locked need a
+development build (`eas build --profile development`).
+
+Checks: `npx tsc --noEmit`, `npx expo lint`, and `npm test` (live tracking logic).
