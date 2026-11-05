@@ -5,6 +5,7 @@
 //   results trip options          trip  step-by-step directions
 import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useBottomTabBarHeight } from 'expo-router/js-tabs';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -23,6 +24,7 @@ import { Space, useColors, type Colors } from '@/constants/theme';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useRiderType } from '@/hooks/use-rider-type';
+import { activeTrip } from '@/lib/active-trip';
 import { api } from '@/lib/api';
 import { peso } from '@/lib/format';
 import { toCoord } from '@/lib/geo';
@@ -306,7 +308,14 @@ export default function PlanScreen() {
         </View>
       );
     }
-    if (mode === 'trip' && trip) return <TripSteps trip={trip} />;
+    if (mode === 'trip' && trip) {
+      return (
+        <View>
+          <TripSteps trip={trip} />
+          <View style={styles.startSpace} />
+        </View>
+      );
+    }
     return null;
   })();
 
@@ -351,6 +360,20 @@ export default function PlanScreen() {
           style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.8 : 1 }]}>
           <Icon name="play.fill" color={c.accentText} size={15} fallback="▶" />
           <Text style={styles.startText}>Start</Text>
+        </Pressable>
+      )}
+
+      {mode === 'trip' && trip && (
+        <Pressable
+          onPress={() => {
+            activeTrip.set(trip);
+            router.push('/live');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Go: follow this trip live"
+          style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="location.north.fill" color={c.accentText} size={15} fallback="➤" />
+          <Text style={styles.startText}>Go</Text>
         </Pressable>
       )}
     </View>
