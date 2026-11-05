@@ -244,7 +244,7 @@ export default function PlanScreen() {
           {location.status === 'denied' && (
             <Text style={styles.notice}>Location is off, so set a start point. To use your location, allow it for SakayApp in Settings.</Text>
           )}
-          <Text style={styles.hint}>Tap a field to search a place, street or address. You can also press and hold on the map.</Text>
+          <Text style={[styles.hint, styles.homeHint]}>Tap a field to search a place, street or address. You can also press and hold on the map.</Text>
         </View>
       );
     }
@@ -389,6 +389,7 @@ const makeStyles = (c: Colors) =>
     rowTitle: { fontSize: 15, color: c.text },
     muted: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     hint: { fontSize: 12, color: c.textSecondary, marginTop: Space.md },
+    homeHint: { marginTop: 2 }, // sits right under the From / To fields
     notice: { backgroundColor: c.warnBg, color: c.warnText, borderRadius: 8, padding: Space.md, marginVertical: Space.sm, overflow: 'hidden' },
     crosshair: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', paddingBottom: 36 },
     fab: {

@@ -25,7 +25,7 @@ export function useSheetHeights(reservedBelow = 0) {
     const screen = height - reservedBelow;
     const bottomInset = reservedBelow ? 0 : insets.bottom;
     return {
-      peek: 150 + bottomInset,
+      peek: 172 + bottomInset, // grabber, From / To fields and a two-line hint
       half: Math.round(screen * 0.5),
       full: screen - insets.top - Space.sm, // stops just below the notch / status bar
     };
