@@ -30,6 +30,13 @@ def connection() -> Iterator[psycopg2.extensions.connection]:
         conn.close()
 
 
+@contextmanager
+def transaction() -> Iterator[RealDictCursor]:
+    """A dict cursor inside one transaction (commit on success, rollback on error)."""
+    with connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        yield cur
+
+
 def fetch_all(sql: str, params: Sequence = ()) -> list[dict]:
     with connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(sql, params)

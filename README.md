@@ -56,6 +56,21 @@ uvicorn app.main:app --reload      # API docs at http://localhost:8000/docs
 python3 -m pytest                 # needs the database running for the API tests
 ```
 
+### Admin page (route and fare entry)
+```bash
+cd backend
+python3 -m app.create_admin you@example.com   # asks for a password (10+ characters)
+uvicorn app.main:app --reload
+```
+Open http://localhost:8000/admin and sign in. To add a route:
+1. **Routes → + New route**: enter a code (letters, digits, `_`, `-`) and a name.
+2. **Draw line**: click along the streets in the direction the jeepney travels. Click an existing stop to pass exactly through it.
+3. **Auto-place**: stops are added every N metres. Existing stops on the line are reused, so routes that meet share a transfer stop. Rename important stops to their landmark.
+4. **Save route**: distances between stops are measured along the line, and the trip planner reloads immediately.
+5. Check the result in **Test trip** by clicking a start and a destination on the map.
+
+Enter the official LTFRB fare values with their citation under **Fares**. Until a non-placeholder rule exists, the app shows fares as unavailable.
+
 ### Mobile
 ```bash
 cd mobile

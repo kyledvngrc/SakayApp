@@ -21,6 +21,8 @@ def _path(value: str) -> Path:
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "postgresql://sakay@localhost:5432/sakay")
     prolog_rules_path: Path = _path(os.getenv("PROLOG_RULES_PATH", "prolog/routes.pl"))
+    jwt_secret: str = os.getenv("JWT_SECRET", "")
+    token_ttl_hours: int = 12
 
     # Trip search
     walk_radius_m: float = 500.0       # how far a commuter is asked to walk to/from a stop
