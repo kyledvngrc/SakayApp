@@ -71,12 +71,12 @@ Open http://localhost:8000/admin and sign in. To add a route:
 
 Enter the official LTFRB fare values with their citation under **Fares**. Until a non-placeholder rule exists, the app shows fares as unavailable.
 
-### Mobile
+### Mobile (iPhone with Expo Go)
 ```bash
-cd mobile
-npm install
-npx expo start
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000   # reachable from the phone
+cd mobile && npm install && npx expo start                       # scan the QR code with the iPhone
 ```
+See `mobile/README.md`. The phone must be on the same Wi-Fi as the computer.
 
 ## How trips are planned
 Jeepneys pick up and drop off anywhere, so there are no fixed stops. Each route is the line it drives along.
