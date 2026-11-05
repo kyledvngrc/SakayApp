@@ -294,18 +294,15 @@ export default function PlanScreen() {
               trip={t}
               selected={i === selected}
               onPress={() => setSelected(i)}
-              onStart={() => {
-                setSelected(i);
-                setMode('trip');
-              }}
             />
           ))}
           {trips.length > 0 && (
             <Text style={styles.hint}>
-              Tap a trip to see it on the map, or Start for directions. {plan.data?.estimates_note}
+              Tap a trip to see it on the map, then Start for directions. {plan.data?.estimates_note}
               {plan.data?.fare_source ? ` Fares: ${plan.data.fare_source}.` : ''}
             </Text>
           )}
+          {trips.length > 0 && <View style={styles.startSpace} />}
         </View>
       );
     }
@@ -345,6 +342,17 @@ export default function PlanScreen() {
       <Sheet size={sheet} reservedBelow={tabBar} onSizeChange={setSheet} header={header}>
         {body}
       </Sheet>
+
+      {mode === 'results' && trip && (
+        <Pressable
+          onPress={() => setMode('trip')}
+          accessibilityRole="button"
+          accessibilityLabel={`Start trip ${selected + 1}: ${trip.route_codes.join(' then ')}`}
+          style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="play.fill" color={c.accentText} size={15} fallback="▶" />
+          <Text style={styles.startText}>Start</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -394,6 +402,13 @@ const makeStyles = (c: Colors) =>
     muted: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     hint: { fontSize: 12, color: c.textSecondary, marginTop: Space.md },
     homeHint: { marginTop: 2 }, // sits right under the From / To fields
+    startButton: {
+      position: 'absolute', left: Space.lg, bottom: Space.lg, flexDirection: 'row', alignItems: 'center', gap: Space.sm,
+      backgroundColor: c.accent, borderRadius: 26, paddingHorizontal: Space.xl, paddingVertical: 14,
+      shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    },
+    startText: { color: c.accentText, fontSize: 17, fontWeight: '700' },
+    startSpace: { height: 72 }, // keeps the last trip card clear of the Start button
     notice: { backgroundColor: c.warnBg, color: c.warnText, borderRadius: 8, padding: Space.md, marginVertical: Space.sm, overflow: 'hidden' },
     crosshair: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', paddingBottom: 36 },
     fab: {
