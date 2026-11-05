@@ -20,7 +20,7 @@ Admin web page (Leaflet) ──────┴─> FastAPI ──> PostgreSQL 16
 
 ## Repository layout
 ```
-database/   schema.sql, seed.sql (SAMPLE DATA ONLY)
+database/   schema.sql, seed.sql (empty), migrations/
 prolog/     routes.pl
 backend/    FastAPI app and tests
 mobile/     Expo iOS app
@@ -53,7 +53,7 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload      # API docs at http://localhost:8000/docs
-python3 -m pytest                 # needs the database running for the API tests
+python3 -m pytest                 # uses a separate sakay_test database; your data is never touched
 ```
 
 ### Admin page (route and fare entry)
@@ -79,7 +79,7 @@ npx expo start
 ```
 
 ## Data
-All seed data is **placeholder only**. Real routes are entered through the admin page, and each record notes its data source and collection date. Fares come from the official LTFRB fare matrix (citation in `docs/tech-justification.md`).
+The database starts empty (`seed.sql` has no data). Real routes are entered through the admin page, and each record notes its data source and collection date. Fares come from the official LTFRB fare matrix (citation in `docs/tech-justification.md`).
 
 ## Contributing
 `main` must always work. Make one branch per feature (`feature/<name>`) and merge by pull request with at least one reviewer. Never commit `.env`.

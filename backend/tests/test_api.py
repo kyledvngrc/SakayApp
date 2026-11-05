@@ -12,7 +12,8 @@ except psycopg2.OperationalError:
 
 from app.main import app  # noqa: E402
 
-# Seed: R01 A(1)-B(2)-C(3), R02 C(3)-D(4)-E(5); fare rule is a placeholder.
+# Sample network from conftest.py (test database only):
+# R01 A(1)-B(2)-C(3), R02 C(3)-D(4)-E(5); fare rule is a placeholder.
 A = {"lat": 7.0700, "lng": 125.6100}
 E = {"lat": 7.0820, "lng": 125.6110}
 
